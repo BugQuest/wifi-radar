@@ -88,6 +88,7 @@ export function Scene3D() {
   const devices = useStore((s) => s.devices);
   const sensors = useStore((s) => s.sensors);
   const csiHistory = useStore((s) => s.csiHistory);
+  const calibrationMode = useStore((s) => s.calibrationMode);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   const sortedSensorIds = useMemo(() => [...sensors.keys()].sort(), [sensors]);
@@ -145,7 +146,14 @@ export function Scene3D() {
         />
       ))}
 
-      <OrbitControls ref={controlsRef} enableDamping dampingFactor={0.08} minDistance={4} maxDistance={40} />
+      <OrbitControls
+        ref={controlsRef}
+        enabled={!calibrationMode}
+        enableDamping
+        dampingFactor={0.08}
+        minDistance={4}
+        maxDistance={40}
+      />
     </Canvas>
   );
 }
