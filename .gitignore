@@ -1,0 +1,92 @@
+# =========================================================================
+# Secrets — never commit
+# =========================================================================
+ap-pass
+*.pass
+*.secret
+.env
+.env.*
+!.env.example
+
+# =========================================================================
+# Tooling state (IDE, editor, local Claude config)
+# =========================================================================
+.vscode/
+.idea/
+.claude/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# =========================================================================
+# ESP-IDF firmware build artifacts
+# =========================================================================
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/sdkconfig.ci
+firmware/managed_components/
+firmware/dependencies.lock
+
+# =========================================================================
+# Python backend
+# =========================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.so
+
+# =========================================================================
+# Frontend (Node / Vite)
+# =========================================================================
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+.eslintcache
+
+# TypeScript incremental build state + emitted JS/d.ts
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# =========================================================================
+# Runtime data (DuckDB, parquet, persisted configs) — never commit user data
+# =========================================================================
+data/
+wifi-radar-data/
+*.duckdb
+*.duckdb.wal
+*.parquet
+
+# =========================================================================
+# Logs
+# =========================================================================
+*.log
+/tmp/
+nohup.out
+
+# =========================================================================
+# Backend static (built frontend deployed there)
+# =========================================================================
+backend/static/
+
+# =========================================================================
+# OS / temp
+# =========================================================================
+*.swp
+*.swo
+*~
+*.tmp

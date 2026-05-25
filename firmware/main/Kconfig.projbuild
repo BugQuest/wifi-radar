@@ -1,0 +1,32 @@
+menu "Wifi Radar Configuration"
+
+    config RADAR_SENSOR_ID
+        string "Sensor identifier"
+        default "r0"
+        help
+            Short ID emitted in every JSON event under "sid". Use a unique
+            value per ESP32 when running multiple sensors (e.g. r0, r1, r2).
+
+    config RADAR_WIFI_SSID
+        string "Target AP SSID"
+        default "changeme-ssid"
+        help
+            Build-time fallback SSID. The runtime SSID is stored in NVS and
+            pushed from the web UI's WiFi config panel. This default only
+            applies on first boot before any NVS entry is written.
+
+    config RADAR_WIFI_PASSWORD
+        string "Target AP Password"
+        default "changeme-password"
+        help
+            Build-time fallback password. The real password is stored in NVS
+            (encrypted on the ESP32 partition) and pushed at runtime.
+            Empty for open networks.
+
+    config RADAR_UART_BAUD
+        int "UART baud rate for data output"
+        default 921600
+        help
+            High baud rate is necessary to stream CSI without backpressure.
+
+endmenu
