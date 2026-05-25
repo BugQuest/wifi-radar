@@ -164,7 +164,13 @@ export function DeviceList() {
 
   if (!visible) return null;
   return (
-    <div className="flex flex-col h-full bg-radar-panel/80 border-l border-radar-border">
+    <div
+      className="
+        fixed inset-x-0 bottom-0 top-24 z-30
+        md:static md:inset-auto md:z-auto md:w-80 md:shrink-0
+        flex flex-col bg-radar-panel/95 backdrop-blur border-l border-radar-border
+      "
+    >
       <div className="px-3 py-2 border-b border-radar-border flex flex-col gap-2">
         <div className="flex items-center">
           <h2 className="text-xs uppercase tracking-wider text-zinc-400">📋 Devices ({devices.size})</h2>

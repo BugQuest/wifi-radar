@@ -34,7 +34,7 @@ export function PresencePanel() {
       ? "weak"
       : "noise";
   return (
-    <div className="absolute left-3 bottom-3 w-64 px-3 py-2 bg-radar-panel/90 border border-radar-border rounded font-mono z-20" style={drag.style}>
+    <div className="absolute left-2 right-2 bottom-2 sm:left-3 sm:right-auto sm:bottom-3 sm:w-64 px-3 py-2 bg-radar-panel/90 border border-radar-border rounded font-mono z-20" style={drag.style}>
       <div {...drag.headerProps} className="flex items-center gap-2 mb-1 select-none">
         <span
           className="w-2 h-2 rounded-full"

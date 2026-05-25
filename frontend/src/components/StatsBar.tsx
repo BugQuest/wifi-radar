@@ -22,8 +22,8 @@ export function StatsBar() {
   const sensors = useStore((s) => s.sensors);
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-radar-bg/90 border-b border-radar-border">
-      <div className="flex items-center gap-2 mr-3">
+    <div className="flex items-center gap-2 px-2 sm:px-3 py-2 bg-radar-bg/90 border-b border-radar-border overflow-x-auto shrink-0">
+      <div className="flex items-center gap-2 shrink-0">
         <span
           className={`w-2.5 h-2.5 rounded-full ${
             conn === "open"
@@ -33,9 +33,9 @@ export function StatsBar() {
               : "bg-red-500"
           }`}
         />
-        <span className="text-xs text-zinc-400">{conn}</span>
+        <span className="text-xs text-zinc-400 hidden sm:inline">{conn}</span>
       </div>
-      <span className="text-radar-accent font-semibold mr-4">WIFI RADAR</span>
+      <span className="text-radar-accent font-semibold text-sm sm:text-base shrink-0">RADAR</span>
       <Pill label="Sensors" value={`${sensors.size || 0}`} accent={sensors.size > 0} />
       <Pill label="Devices" value={`${devices.size}`} accent />
       <Pill label="Sniff/s" value={stats.sniff_rate.toFixed(1)} />
@@ -51,8 +51,8 @@ export function StatsBar() {
           </span>
         </div>
       ))}
-      <div className="ml-auto flex items-center gap-3">
-        <span className="text-xs text-zinc-500">
+      <div className="ml-auto flex items-center gap-3 shrink-0">
+        <span className="text-xs text-zinc-500 hidden lg:inline">
           Σ sniff {stats.sniff_count.toLocaleString()} · csi {stats.csi_count.toLocaleString()}
         </span>
         <ViewToolbar />

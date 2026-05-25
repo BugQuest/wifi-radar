@@ -36,7 +36,11 @@ export function SensorDiagnostics() {
 
   return (
     <div
-      className="absolute right-3 top-16 w-80 max-h-[calc(100vh-5rem)] flex flex-col bg-radar-panel/95 border border-radar-border rounded font-mono text-[10px] z-20"
+      className="
+        absolute right-2 top-2 left-2 max-h-[calc(100vh-1rem)]
+        sm:right-3 sm:top-16 sm:left-auto sm:w-80 sm:max-h-[calc(100vh-5rem)]
+        flex flex-col bg-radar-panel/95 border border-radar-border rounded font-mono text-[10px] z-20
+      "
       style={drag.style}
     >
       <div

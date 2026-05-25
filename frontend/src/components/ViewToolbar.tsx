@@ -36,7 +36,7 @@ export function ViewToolbar() {
   };
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5 sm:gap-1">
       {ENTRIES.map((e) => {
         const on = panels[e.key];
         return (
@@ -44,7 +44,7 @@ export function ViewToolbar() {
             key={e.key}
             onClick={() => togglePanel(e.key)}
             title={`${on ? "Hide" : "Show"} ${e.label}`}
-            className={`px-2 py-1 rounded border text-sm transition-colors ${
+            className={`px-1.5 sm:px-2 py-1 rounded border text-sm transition-colors ${
               on
                 ? "border-radar-accent text-radar-accent bg-radar-accent/10"
                 : "border-radar-border text-zinc-500 hover:border-radar-accent hover:text-radar-accent"
@@ -57,7 +57,7 @@ export function ViewToolbar() {
       <button
         onClick={toggleCalibration}
         title={calibrationMode ? "Lock sensor positions" : "Drag-calibrate sensors"}
-        className={`px-2 py-1 rounded border text-sm transition-colors ml-1 ${
+        className={`px-1.5 sm:px-2 py-1 rounded border text-sm transition-colors ml-0.5 sm:ml-1 ${
           calibrationMode
             ? "border-radar-warn text-radar-warn bg-radar-warn/10 animate-pulse"
             : "border-radar-border text-zinc-500 hover:border-radar-warn hover:text-radar-warn"

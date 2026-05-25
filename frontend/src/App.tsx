@@ -32,9 +32,9 @@ export default function App() {
   }, [applyEvent, setConnState]);
 
   return (
-    <div className="h-screen w-screen flex flex-col">
+    <div className="h-screen w-screen flex flex-col overflow-hidden">
       <StatsBar />
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 relative">
         <div className="flex-1 relative min-w-0">
           <Scene3D />
           <DeviceDetail />
@@ -43,9 +43,8 @@ export default function App() {
           <SystemPanel />
           <ConfigPanel />
         </div>
-        <div className="w-80 shrink-0">
-          <DeviceList />
-        </div>
+        {/* DeviceList: sidebar on desktop, full-screen overlay on mobile */}
+        <DeviceList />
       </div>
       <CSIWaterfall />
     </div>

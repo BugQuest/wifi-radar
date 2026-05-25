@@ -174,7 +174,11 @@ export function ConfigPanel() {
 
   return (
     <div
-      className="absolute left-4 bottom-4 w-96 max-h-[calc(100vh-2rem)] flex flex-col bg-radar-panel/95 border border-radar-border rounded-lg shadow-2xl backdrop-blur z-20 overflow-hidden"
+      className="
+        absolute left-2 right-2 bottom-2 max-h-[calc(100vh-1rem)]
+        sm:left-4 sm:right-auto sm:bottom-4 sm:w-96 sm:max-h-[calc(100vh-2rem)]
+        flex flex-col bg-radar-panel/95 border border-radar-border rounded-lg shadow-2xl backdrop-blur z-20 overflow-hidden
+      "
       style={drag.style}
     >
       <div

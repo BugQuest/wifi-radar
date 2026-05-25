@@ -66,7 +66,11 @@ export function SystemPanel() {
 
   return (
     <div
-      className="absolute right-3 bottom-3 w-72 bg-radar-panel/95 border border-radar-border rounded font-mono text-[10px] z-20"
+      className="
+        absolute right-2 bottom-2 left-2 max-h-[60vh] overflow-y-auto
+        sm:right-3 sm:bottom-3 sm:left-auto sm:w-72 sm:max-h-none sm:overflow-visible
+        bg-radar-panel/95 border border-radar-border rounded font-mono text-[10px] z-20
+      "
       style={drag.style}
     >
       <div {...drag.headerProps} className="flex items-center gap-2 px-3 py-1.5 border-b border-radar-border select-none">

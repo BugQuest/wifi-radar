@@ -51,7 +51,7 @@ export function CSIWaterfall() {
   const togglePanel = useStore((s) => s.togglePanel);
   if (!visible) return null;
   return (
-    <div className="h-32 bg-radar-bg border-t border-radar-border flex flex-col">
+    <div className="h-20 sm:h-32 bg-radar-bg border-t border-radar-border flex flex-col shrink-0">
       <div className="px-3 py-1 border-b border-radar-border flex items-center gap-3">
         <span className="text-xs uppercase tracking-wider text-zinc-400">🌊 CSI Waterfall</span>
         <span className="text-[10px] text-zinc-500">{csi.length} samples · 64 subcarriers</span>

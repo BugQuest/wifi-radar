@@ -221,7 +221,11 @@ export function DeviceDetail() {
 
   return (
     <div
-      className="absolute left-4 top-4 w-80 max-h-[calc(100vh-2rem)] flex flex-col bg-radar-panel/95 border border-radar-border rounded-lg shadow-2xl backdrop-blur z-20 overflow-hidden"
+      className="
+        absolute left-2 top-2 right-2 max-h-[calc(100vh-1rem)]
+        sm:left-4 sm:top-4 sm:right-auto sm:w-80 sm:max-h-[calc(100vh-2rem)]
+        flex flex-col bg-radar-panel/95 border border-radar-border rounded-lg shadow-2xl backdrop-blur z-20 overflow-hidden
+      "
       style={drag.style}
     >
       <div
