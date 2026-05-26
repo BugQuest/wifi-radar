@@ -47,6 +47,9 @@ export interface Sensor {
   csi_count: number;
   sniff_rate: number;
   csi_rate: number;
+  ping_recv: number;
+  ping_lost: number;
+  ping_interval_ms: number;
 }
 
 export interface Stats {

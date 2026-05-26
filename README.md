@@ -91,6 +91,13 @@ Côté navigateur :
 
 `esp_wifi_set_csi(true)` + callback csi_cb → pour chaque frame, vecteur complexe `H[k]` (k=0..63) qui décrit l'atténuation et le déphasage par sous-porteuse OFDM. Codé en int8 interleaved (imag, real) → 128 octets par event CSI.
 
+**Booster le débit CSI — ping périodique de la gateway.** Le firmware lance une session `esp_ping` vers la gateway dès qu'il obtient une IP. Chaque ICMP echo request + reply génère du trafic on-channel, donc :
+
+- l'ESP32 émetteur reçoit le reply → CSI sur lui,
+- les autres ESP32, en mode promiscuous sur le même canal, captent les deux frames → CSI sur eux aussi.
+
+Avec 3 capteurs qui pingent chacun à 50 ms (~20 Hz), on plafonne typiquement à 60–80 events CSI/s/capteur (contre ~5 Hz sans, sur un canal calme). Ajustable à chaud depuis le panneau 📡 (champ **CSI ping**, plage 10–5000 ms) — en interne ça broadcaste `{"cmd":"set_ping_rate","interval_ms":N}` à tous les ESP32, qui recréent leur session ping sans reboot. Le heartbeat remonte `ping.recv` / `ping.lost` / `ping.ms` pour vérifier que ça tourne.
+
 ### Détection de mouvement par variance CSI
 
 Un environnement statique → motif CSI stable. Un corps qui bouge → variations corrélées sur plusieurs sous-porteuses (le canal radio est modifié par la diffraction/réflexion sur le corps).
@@ -591,8 +598,12 @@ En live :
 
 ```json
 { "t":"hb", "sid":"r0", "connected":true, "ssid":"bq-radar", "rssi":-21, "ch":13,
-  "drops":0, "ring_free":15876, "ts":1742670190.001 }
+  "drops":0, "ring_free":15876,
+  "ping":{ "recv":1843, "lost":2, "ms":50 },
+  "ts":1742670190.001 }
 ```
+
+`ping.recv` et `ping.lost` sont des compteurs cumulatifs depuis le boot ; `ping.ms` reflète l'intervalle courant. `ping_recv` / `ping_lost` / `ping_interval_ms` se retrouvent par capteur dans le snapshot `stats`.
 
 ### Command ack
 
@@ -803,8 +814,8 @@ wifi-radar/
 | Path-loss in situ calibration UI | meilleure conversion RSSI → distance | ✅ done (panneau 📏) |
 | Mobile / portrait UI | tablette, smartphone | ✅ done (responsive breakpoints) |
 | Sensor position calibration (drag) | trilatération basée sur les vraies positions | ✅ done (mode 📐) |
-| Ping périodique ESP32 → Pi (firmware) | CSI à 50 Hz pour détection mouvement fine | pending |
-| FFT 0.1–0.5 Hz sur amplitude CSI | détection de **respiration** | pending (besoin du ping périodique avant) |
+| Ping périodique gateway (firmware) | CSI stable à ~20 Hz par défaut, ajustable depuis l'UI | ✅ done (panneau 📡 → champ `CSI ping`) |
+| FFT 0.1–0.5 Hz sur amplitude CSI | détection de **respiration** | pending (le ping périodique est en place, prêt à exploiter) |
 | Clustering DBSCAN sur positions | grouper plusieurs corps en mouvement | pending |
 | Export Prometheus | dashboards Grafana | pending (facile) |
 | Sensor height calibration (3D) | trilatération 3D vraie | pending (gros) |

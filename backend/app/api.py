@@ -6,7 +6,7 @@ import time
 from urllib import request as _urlreq
 from urllib.error import URLError
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from .state import state
 from .presence import presence_detector
@@ -128,6 +128,29 @@ def broadcast_command(payload: dict) -> dict:
         raise HTTPException(400, "payload must include 'cmd'")
     reached = serial_writer.write_command_all(payload)
     return {"ok": True, "pushed_to": reached, "count": len(reached)}
+
+
+class PingRatePayload(BaseModel):
+    interval_ms: int
+
+    @field_validator("interval_ms")
+    @classmethod
+    def _check_interval(cls, v: int) -> int:
+        if not (10 <= int(v) <= 5000):
+            raise ValueError("interval_ms must be in [10, 5000]")
+        return int(v)
+
+
+@router.post("/ping-rate")
+def set_ping_rate(payload: PingRatePayload) -> dict:
+    """Tell every connected ESP32 to change its gateway-ping interval.
+
+    Lower interval = more frames on the channel = higher CSI rate, at the cost
+    of airtime.  50 ms (20 Hz) is the firmware default.
+    """
+    cmd = {"cmd": "set_ping_rate", "interval_ms": int(payload.interval_ms)}
+    reached = serial_writer.write_command_all(cmd)
+    return {"ok": True, "pushed_to": reached, "count": len(reached), "interval_ms": payload.interval_ms}
 
 
 # -------- Path-loss calibration --------

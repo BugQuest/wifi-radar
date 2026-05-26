@@ -29,4 +29,23 @@ menu "Wifi Radar Configuration"
         help
             High baud rate is necessary to stream CSI without backpressure.
 
+    config RADAR_PING_ENABLED
+        bool "Enable periodic gateway ping (boosts CSI rate)"
+        default y
+        help
+            When enabled, the sensor pings the AP gateway on a fixed interval
+            so the Wi-Fi radio receives traffic and produces CSI reports at a
+            stable rate.  Every ping frame on the channel is also visible to
+            the other sensors in promiscuous mode, so a single ping session
+            per sensor boosts CSI throughput for the whole fleet.
+
+    config RADAR_PING_INTERVAL_MS
+        int "Gateway ping interval (ms)"
+        default 50
+        range 10 5000
+        help
+            Period between ICMP echo requests sent to the gateway.  Lower
+            value = more CSI samples per second but more channel airtime.
+            50 ms (20 Hz) is a good default.
+
 endmenu

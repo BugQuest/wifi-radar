@@ -198,6 +198,12 @@ class Sensor:
     csi_count: int = 0
     sniff_rate: float = 0.0
     csi_rate: float = 0.0
+    # Gateway-ping telemetry (firmware emits cumulative recv/lost counters and the
+    # configured interval; we surface them so the UI can confirm CSI boosting is
+    # actually happening).
+    ping_recv: int = 0
+    ping_lost: int = 0
+    ping_interval_ms: int = 0
     _sniff_ts: deque[float] = field(default_factory=lambda: deque(maxlen=2048))
     _csi_ts: deque[float] = field(default_factory=lambda: deque(maxlen=2048))
 
@@ -219,6 +225,9 @@ class Sensor:
             "csi_count": self.csi_count,
             "sniff_rate": self.sniff_rate,
             "csi_rate": self.csi_rate,
+            "ping_recv": self.ping_recv,
+            "ping_lost": self.ping_lost,
+            "ping_interval_ms": self.ping_interval_ms,
         }
 
 
@@ -365,6 +374,11 @@ class State:
         sensor.ap_rssi = int(ev.get("rssi", sensor.ap_rssi))
         sensor.drops = int(ev.get("drops", sensor.drops))
         sensor.ring_free = int(ev.get("ring_free", sensor.ring_free))
+        ping = ev.get("ping")
+        if isinstance(ping, dict):
+            sensor.ping_recv = int(ping.get("recv", sensor.ping_recv))
+            sensor.ping_lost = int(ping.get("lost", sensor.ping_lost))
+            sensor.ping_interval_ms = int(ping.get("ms", sensor.ping_interval_ms))
 
         # Aggregate stats reflect the first connected sensor (legacy).
         connected = [s for s in self.sensors.values() if s.connected]
