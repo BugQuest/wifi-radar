@@ -26,11 +26,22 @@ export interface SnapshotPos {
   z: number;
   confidence: number;
 }
+export interface SnapshotTrailPoint {
+  ts: number;
+  x: number;
+  z: number;
+}
 export interface SnapshotDevice {
   mac: string;
   rssi: number;
   last_seen: number;
   pos: SnapshotPos | null;
+  trail?: SnapshotTrailPoint[];
+}
+export interface SnapshotHeatmap {
+  size: number;       // grid edge (e.g. 40)
+  max: number;        // raw max for scale ref
+  values: number[];   // length = size*size, each ∈ [0, 127]
 }
 export interface SnapshotSensor {
   id: string;
@@ -45,6 +56,7 @@ export interface SnapshotPayload {
   devices: SnapshotDevice[];
   sensors: SnapshotSensor[];
   presence: { position?: { x: number; z: number } | null; intensity?: number; correlation?: number } | null;
+  heatmap?: SnapshotHeatmap | null;
 }
 
 // Toggleable 3D-scene render layers.  Backed by zustand so any UI surface can

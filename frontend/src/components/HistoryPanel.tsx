@@ -60,6 +60,10 @@ export function HistoryPanel() {
   const [presence, setPresence] = useState<PresenceEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Auto-playback: when `playing`, an interval advances replayAt one snapshot
+  // step every `playPeriodMs`.  Speed buttons just change that period.
+  const [playing, setPlaying] = useState(false);
+  const [playPeriodMs, setPlayPeriodMs] = useState(500);  // 1× = 500ms (one snap / 0.5s)
   // Cache fetched snapshots by exact ts so dragging the slider back and forth
   // doesn't pound the backend.
   const snapshotCache = useRef<Map<number, SnapshotPayload>>(new Map());
@@ -123,6 +127,25 @@ export function HistoryPanel() {
     }
     return best;
   }, [slider, replayAt]);
+
+  // Auto-playback: advance one snapshot per tick.  Stops at the end (= live).
+  useEffect(() => {
+    if (!playing || !replayMode || slider.length === 0) return;
+    const id = window.setInterval(() => {
+      const idx = sliderIdx;
+      if (idx >= slider.length - 1) {
+        setPlaying(false);   // reached "now" — exit play
+        return;
+      }
+      setReplayAt(slider[idx + 1]);
+    }, playPeriodMs);
+    return () => window.clearInterval(id);
+  }, [playing, replayMode, playPeriodMs, sliderIdx, slider, setReplayAt]);
+
+  // Leaving replay also stops playback.
+  useEffect(() => {
+    if (!replayMode && playing) setPlaying(false);
+  }, [replayMode, playing]);
 
   const startReplay = (ts?: number) => {
     setReplayMode(true);
@@ -202,7 +225,10 @@ export function HistoryPanel() {
             min={0}
             max={Math.max(0, slider.length - 1)}
             value={sliderIdx}
-            onChange={(e) => setReplayAt(slider[Number(e.target.value)])}
+            onChange={(e) => {
+              setPlaying(false);
+              setReplayAt(slider[Number(e.target.value)]);
+            }}
             className="w-full accent-radar-accent"
           />
           <div className="flex justify-between text-[9px] text-zinc-500">
@@ -212,20 +238,55 @@ export function HistoryPanel() {
             </span>
             <span>{slider[slider.length - 1] ? fmtTime(slider[slider.length - 1]) : "—"}</span>
           </div>
+          {/* Playback row: play/pause + speed presets */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPlaying((p) => !p)}
+              disabled={sliderIdx >= slider.length - 1 && !playing}
+              className={`px-2 py-0.5 rounded border ${
+                playing
+                  ? "border-radar-warn text-radar-warn bg-radar-warn/10"
+                  : "border-radar-accent text-radar-accent hover:bg-radar-accent/10"
+              } disabled:opacity-40`}
+              title={playing ? "Pause" : "Play"}
+            >
+              {playing ? "⏸" : "▶"}
+            </button>
+            <span className="text-zinc-600 text-[9px]">speed</span>
+            {[
+              { label: "1×", ms: 500 },
+              { label: "2×", ms: 250 },
+              { label: "4×", ms: 125 },
+              { label: "8×", ms: 60 },
+            ].map((s) => (
+              <button
+                key={s.label}
+                onClick={() => setPlayPeriodMs(s.ms)}
+                className={`px-1.5 py-0.5 rounded border text-[9px] ${
+                  playPeriodMs === s.ms
+                    ? "border-radar-accent text-radar-accent bg-radar-accent/10"
+                    : "border-radar-border text-zinc-500 hover:border-radar-accent hover:text-radar-accent"
+                }`}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          {/* Jump shortcuts */}
           <div className="flex gap-1">
-            <button onClick={() => setReplayAt(slider[Math.max(0, sliderIdx - 10)])}
+            <button onClick={() => { setPlaying(false); setReplayAt(slider[Math.max(0, sliderIdx - 10)]); }}
               className="flex-1 px-1.5 py-0.5 rounded border border-radar-border hover:border-radar-accent hover:text-radar-accent">
               «« −50s
             </button>
-            <button onClick={() => setReplayAt(slider[Math.max(0, sliderIdx - 1)])}
+            <button onClick={() => { setPlaying(false); setReplayAt(slider[Math.max(0, sliderIdx - 1)]); }}
               className="flex-1 px-1.5 py-0.5 rounded border border-radar-border hover:border-radar-accent hover:text-radar-accent">
               « −5s
             </button>
-            <button onClick={() => setReplayAt(slider[Math.min(slider.length - 1, sliderIdx + 1)])}
+            <button onClick={() => { setPlaying(false); setReplayAt(slider[Math.min(slider.length - 1, sliderIdx + 1)]); }}
               className="flex-1 px-1.5 py-0.5 rounded border border-radar-border hover:border-radar-accent hover:text-radar-accent">
               +5s »
             </button>
-            <button onClick={() => setReplayAt(slider[Math.min(slider.length - 1, sliderIdx + 10)])}
+            <button onClick={() => { setPlaying(false); setReplayAt(slider[Math.min(slider.length - 1, sliderIdx + 10)]); }}
               className="flex-1 px-1.5 py-0.5 rounded border border-radar-border hover:border-radar-accent hover:text-radar-accent">
               +50s »»
             </button>

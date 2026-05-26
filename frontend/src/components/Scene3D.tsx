@@ -113,9 +113,11 @@ export function Scene3D() {
       <ambientLight intensity={0.2} />
 
       {layers.grid && <Floor />}
-      {/* In replay mode the live heatmap stays — there's no historical heatmap
-          stored, but the grid + sensors give enough spatial context. */}
+      {/* Heatmap: live grid in normal mode, the snapshot's grid in replay. */}
       {!replayMode && layers.heatmap && <HeatmapFloor />}
+      {replayMode && layers.heatmap && replaySnapshot?.heatmap && (
+        <HeatmapFloor override={replaySnapshot.heatmap} />
+      )}
       {layers.sensors && <RangeRings />}
       {!replayMode && <CSIField recent={csiHistory} />}
       {layers.trails && !replayMode && <MotionTrail />}
@@ -178,6 +180,33 @@ export function Scene3D() {
             />
           </mesh>
         ))}
+      {/* Historical trails: one line strip per device with ≥2 trail points. */}
+      {layers.trails && replayMode && (replaySnapshot?.devices ?? [])
+        .filter((d) => (d.trail?.length ?? 0) >= 2)
+        .map((d) => {
+          const pts = d.trail!;
+          const N = pts.length;
+          const positions = new Float32Array(N * 3);
+          const colors = new Float32Array(N * 3);
+          for (let i = 0; i < N; i++) {
+            positions[i * 3] = pts[i].x;
+            positions[i * 3 + 1] = 0.08;
+            positions[i * 3 + 2] = pts[i].z;
+            // Fade from translucent (oldest) to bright (newest).
+            const a = (i + 1) / N;
+            colors[i * 3] = 0.94 * a;     // hot pink-ish trail
+            colors[i * 3 + 1] = 0.36 * a;
+            colors[i * 3 + 2] = 0.78 * a;
+          }
+          const geom = new THREE.BufferGeometry();
+          geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+          geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+          const mat = new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false,
+          });
+          const obj = new THREE.Line(geom, mat);
+          return <primitive key={`trail-${d.mac}`} object={obj} />;
+        })}
 
       <OrbitControls
         ref={controlsRef}

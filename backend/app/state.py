@@ -254,6 +254,12 @@ class State:
     RATE_WINDOW_SEC = 5.0
     PRUNE_AFTER_SEC = 600.0
 
+    # Rolling position history per device, used to draw trails in replay mode.
+    # We only append when a new trilaterated position is computed, so a device
+    # that hasn't moved doesn't bloat the history.
+    _TRAIL_MAXLEN = 16
+    _TRAIL_MIN_MOVE_M = 0.1   # don't append unless > this many meters from last point
+
     def __init__(self) -> None:
         self.devices: dict[str, Device] = {}
         self.csi: deque[dict] = deque(maxlen=self.CSI_RING)
@@ -261,6 +267,8 @@ class State:
         self.stats = Stats()
         self.baseline_half_m = DEFAULT_BASELINE_HALF_M
         self._lock = asyncio.Lock()
+        # mac → deque of (ts, x, z)
+        self._trails: dict[str, deque[tuple[float, float, float]]] = {}
 
     # --- per-sensor helpers ---
     def _ensure_sensor(self, sid: str) -> Sensor:
@@ -421,6 +429,7 @@ class State:
         stale = [m for m, d in self.devices.items() if d.last_seen < cutoff]
         for m in stale:
             del self.devices[m]
+            self._trails.pop(m, None)
 
         # Drop sensors that announced themselves via a sniff but never sent a
         # heartbeat — those are noise that slipped past the JSON parser at boot.
@@ -449,35 +458,82 @@ class State:
     # Threshold for emitting a "move" presence_event vs. silence (meters).
     _PRESENCE_MOVE_THRESHOLD_M = 0.4
 
+    def _push_trail(self, mac: str, ts: float, x: float, z: float) -> None:
+        """Append (ts,x,z) to a device's trail iff it has moved enough."""
+        dq = self._trails.get(mac)
+        if dq is None:
+            dq = deque(maxlen=self._TRAIL_MAXLEN)
+            self._trails[mac] = dq
+        if dq:
+            _t, lx, lz = dq[-1]
+            if ((x - lx) ** 2 + (z - lz) ** 2) ** 0.5 < self._TRAIL_MIN_MOVE_M:
+                return
+        dq.append((ts, x, z))
+
     def _scene_payload(self) -> dict:
         """Serialisable dict captured for replay.  Kept lean — only what
         Scene3D needs to redraw devices, presence and sensors at a past
-        timestamp.  Schema version helps future migrations."""
-        devs = []
+        timestamp.  Schema version helps future migrations.
+
+        v2 adds device trails and a quantised heatmap so replay can show the
+        full scene (movement + activity field), not just point-in-time positions.
+        """
+        now = time.time()
+        devs: list[dict] = []
         for d in self.devices.values():
-            pos = getattr(d, "position_2d", None)
-            try:
-                px = float(pos.x) if pos is not None else None
-                pz = float(pos.z) if pos is not None else None
-                pconf = float(pos.confidence) if pos is not None else 0.0
-            except Exception:
-                px = pz = None
-                pconf = 0.0
+            pos = d.position_2d(self.sensors) if self.sensors else None
+            px = pz = pconf = None
+            if pos is not None:
+                px = float(pos.get("x"))
+                pz = float(pos.get("z"))
+                pconf = float(pos.get("confidence", 0.0))
+                self._push_trail(d.mac, now, px, pz)
+            trail = [
+                {"ts": t, "x": x, "z": z} for (t, x, z) in (self._trails.get(d.mac) or [])
+            ]
             devs.append({
                 "mac": d.mac,
                 "rssi": d.last_rssi,
                 "last_seen": d.last_seen,
-                "pos": {"x": px, "z": pz, "confidence": pconf} if px is not None and pz is not None else None,
+                "pos": {"x": px, "z": pz, "confidence": pconf} if px is not None else None,
+                "trail": trail,
             })
-        sens = []
-        for s in self.sensors.values():
-            sens.append({
-                "id": s.id, "x": s.position_x, "z": s.position_z,
-                "connected": s.connected,
-                "sniff_rate": s.sniff_rate, "csi_rate": s.csi_rate,
-            })
-        pr = presence_detector.state.to_dict() if presence_detector.state else None
-        return {"v": 1, "devices": devs, "sensors": sens, "presence": pr}
+        sens = [
+            {"id": s.id, "x": s.position_x, "z": s.position_z,
+             "connected": s.connected,
+             "sniff_rate": s.sniff_rate, "csi_rate": s.csi_rate}
+            for s in self.sensors.values()
+        ]
+        pr_state = presence_detector.state
+        pr: dict | None = None
+        heatmap_payload: dict | None = None
+        if pr_state is not None:
+            pos = pr_state.position
+            pr = {
+                "position": {"x": pos[0], "z": pos[1]} if pos else None,
+                "intensity": float(pr_state.intensity),
+                "correlation": float(pr_state.correlation),
+            }
+            # Quantised heatmap — same shape as PresenceState.to_dict()'s grid,
+            # so the frontend can reuse the existing HeatmapFloor renderer.
+            m = pr_state.heatmap_max if pr_state.heatmap_max > 0 else 1.0
+            flat: list[int] = []
+            for row in pr_state.heatmap:
+                for v in row:
+                    q = int(min(127, max(0, v / m * 127)))
+                    flat.append(q)
+            heatmap_payload = {
+                "size": len(pr_state.heatmap),
+                "max": pr_state.heatmap_max,
+                "values": flat,
+            }
+        return {
+            "v": 2,
+            "devices": devs,
+            "sensors": sens,
+            "presence": pr,
+            "heatmap": heatmap_payload,
+        }
 
     def _maybe_record_presence_transition(
         self, now: float, prev_pos: tuple[float, float] | None,
