@@ -407,11 +407,28 @@ class State:
         self.stats.sniff_rate = total_sniff / self.RATE_WINDOW_SEC
         self.stats.csi_rate = total_csi / self.RATE_WINDOW_SEC
 
+    # Phantom sensors created from a single stray sniff event never send a
+    # heartbeat.  Drop them after this grace period so the UI doesn't show a
+    # permanent "dead" icosphere.
+    _PHANTOM_SENSOR_AFTER_SEC = 30.0
+
     def _prune(self) -> None:
-        cutoff = time.time() - self.PRUNE_AFTER_SEC
+        now = time.time()
+        cutoff = now - self.PRUNE_AFTER_SEC
         stale = [m for m, d in self.devices.items() if d.last_seen < cutoff]
         for m in stale:
             del self.devices[m]
+
+        # Drop sensors that announced themselves via a sniff but never sent a
+        # heartbeat — those are noise that slipped past the JSON parser at boot.
+        phantoms = [
+            sid for sid, s in self.sensors.items()
+            if s.last_heartbeat == 0.0 and (now - s.first_seen) > self._PHANTOM_SENSOR_AFTER_SEC
+        ]
+        if phantoms:
+            for sid in phantoms:
+                del self.sensors[sid]
+            self._update_sensor_layout()
 
     async def consume(self) -> None:
         async for ev in bus.subscribe(replay_recent=False):

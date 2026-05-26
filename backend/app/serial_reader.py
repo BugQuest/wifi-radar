@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,6 +19,12 @@ log = logging.getLogger(__name__)
 # that occasionally parses as JSON. Validating against known event types drops
 # those phantoms cleanly.
 KNOWN_TYPES = {"sniff", "csi", "hb", "ack"}
+
+# Sid regex — same shape as the firmware's set_sid validator.  Must start with a
+# letter; this rejects single-digit phantoms like "1" that happen to slip
+# through the JSON parser when boot-time noise gets misinterpreted.  Length
+# capped to 16 like NVS storage.
+SID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,15}$")
 
 
 @dataclass
@@ -98,7 +105,7 @@ class RadarProtocol(asyncio.Protocol):
             self.stats.rejected_type += 1
             return
         sid = ev.get("sid")
-        if not isinstance(sid, str) or not sid or len(sid) > 16:
+        if not isinstance(sid, str) or not SID_RE.match(sid):
             self.stats.rejected_sid += 1
             return
         ev["ts"] = time.time()
