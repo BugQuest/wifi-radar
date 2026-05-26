@@ -16,7 +16,36 @@ export interface PosLogEntry {
   conf: number;
 }
 
-export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config" | "calibration" | "firmware" | "layers";
+export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config" | "calibration" | "firmware" | "layers" | "history";
+
+// One frame of historical state fetched from /api/history/snapshot.  Mirrors
+// the backend's _scene_payload(): a small, replay-friendly slice of devices,
+// sensors and presence at a given timestamp.
+export interface SnapshotPos {
+  x: number;
+  z: number;
+  confidence: number;
+}
+export interface SnapshotDevice {
+  mac: string;
+  rssi: number;
+  last_seen: number;
+  pos: SnapshotPos | null;
+}
+export interface SnapshotSensor {
+  id: string;
+  x: number;
+  z: number;
+  connected: boolean;
+  sniff_rate: number;
+  csi_rate: number;
+}
+export interface SnapshotPayload {
+  v: number;
+  devices: SnapshotDevice[];
+  sensors: SnapshotSensor[];
+  presence: { position?: { x: number; z: number } | null; intensity?: number; correlation?: number } | null;
+}
 
 // Toggleable 3D-scene render layers.  Backed by zustand so any UI surface can
 // drive them.  Default to "everything visible" — the user pares down what they
@@ -66,6 +95,13 @@ interface RadarStore {
   focusTrigger: number;     // bumped to ask Scene3D to fly camera to selected
   panels: PanelVisibility;
   layers: LayerVisibility;
+  // Replay (history) mode.  When `replayMode` is true, Scene3D substitutes the
+  // devices / presence layers with whatever is in `replaySnapshot`.  Live
+  // updates keep flowing into devices / sensors / presence as usual so toggling
+  // back to live mode is instant.
+  replayMode: boolean;
+  replayAt: number | null;            // timestamp the user is scrubbing to
+  replaySnapshot: SnapshotPayload | null;
   calibrationMode: boolean;   // when true, sensors can be dragged in the floor plane
   // Path-loss calibration runtime state
   pathLossCapture: CalibrationCapture | null;
@@ -78,6 +114,9 @@ interface RadarStore {
   triggerFocus: () => void;
   togglePanel: (k: PanelKey) => void;
   toggleLayer: (k: LayerKey) => void;
+  setReplayMode: (v: boolean) => void;
+  setReplayAt: (ts: number | null) => void;
+  setReplaySnapshot: (s: SnapshotPayload | null) => void;
   toggleCalibration: () => void;
   updateSensorPosition: (sid: string, x: number, z: number) => void;
   startPathLossCapture: (sensor: string, mac: string, distance_m: number, duration_s: number) => void;
@@ -119,8 +158,11 @@ export const useStore = create<RadarStore>((set, get) => ({
   selectedPositions: [],
   soloMode: false,
   focusTrigger: 0,
-  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false, firmware: false, layers: false },
+  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false, firmware: false, layers: false, history: false },
   layers: { sensors: true, devices: true, trails: true, heatmap: true, presence: true, grid: true, rssiVectors: false },
+  replayMode: false,
+  replayAt: null,
+  replaySnapshot: null,
   calibrationMode: false,
   pathLossCapture: null,
 
@@ -138,6 +180,9 @@ export const useStore = create<RadarStore>((set, get) => ({
   triggerFocus: () => set((s) => ({ focusTrigger: s.focusTrigger + 1 })),
   togglePanel: (k) => set((s) => ({ panels: { ...s.panels, [k]: !s.panels[k] } })),
   toggleLayer: (k) => set((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } })),
+  setReplayMode: (v) => set({ replayMode: v, replayAt: v ? null : null, replaySnapshot: v ? null : null }),
+  setReplayAt: (ts) => set({ replayAt: ts }),
+  setReplaySnapshot: (snap) => set({ replaySnapshot: snap }),
   toggleCalibration: () => set((s) => ({ calibrationMode: !s.calibrationMode })),
   updateSensorPosition: (sid, x, z) =>
     set((s) => {

@@ -91,6 +91,8 @@ export function Scene3D() {
   const csiHistory = useStore((s) => s.csiHistory);
   const calibrationMode = useStore((s) => s.calibrationMode);
   const layers = useStore((s) => s.layers);
+  const replayMode = useStore((s) => s.replayMode);
+  const replaySnapshot = useStore((s) => s.replaySnapshot);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   const sortedSensorIds = useMemo(() => [...sensors.keys()].sort(), [sensors]);
@@ -111,13 +113,23 @@ export function Scene3D() {
       <ambientLight intensity={0.2} />
 
       {layers.grid && <Floor />}
-      {layers.heatmap && <HeatmapFloor />}
+      {/* In replay mode the live heatmap stays — there's no historical heatmap
+          stored, but the grid + sensors give enough spatial context. */}
+      {!replayMode && layers.heatmap && <HeatmapFloor />}
       {layers.sensors && <RangeRings />}
-      <CSIField recent={csiHistory} />
-      {layers.trails && <MotionTrail />}
-      {layers.presence && <PresenceBlob />}
-      {layers.trails && <SelectedDeviceTrail />}
-      {layers.rssiVectors && <RssiVectors />}
+      {!replayMode && <CSIField recent={csiHistory} />}
+      {layers.trails && !replayMode && <MotionTrail />}
+      {/* Live presence blob OR historical presence marker (sphere at the
+          snapshot's centroid). */}
+      {layers.presence && !replayMode && <PresenceBlob />}
+      {layers.presence && replayMode && replaySnapshot?.presence?.position && (
+        <mesh position={[replaySnapshot.presence.position.x, 0.2, replaySnapshot.presence.position.z]}>
+          <sphereGeometry args={[0.25, 24, 24]} />
+          <meshStandardMaterial color="#fb923c" emissive="#fb923c" emissiveIntensity={0.5} transparent opacity={0.85} />
+        </mesh>
+      )}
+      {layers.trails && !replayMode && <SelectedDeviceTrail />}
+      {layers.rssiVectors && !replayMode && <RssiVectors />}
       <CameraFocus controlsRef={controlsRef} />
 
       {layers.sensors && sortedSensorIds.length === 0 && (
@@ -141,13 +153,31 @@ export function Scene3D() {
         );
       })}
 
-      {layers.devices && [...devices.values()].map((d) => (
+      {/* Live devices */}
+      {layers.devices && !replayMode && [...devices.values()].map((d) => (
         <DeviceOrbit
           key={d.mac}
           device={d}
           sensorPositions={positions}
         />
       ))}
+      {/* Historical devices: render simple coloured spheres at the snapshot's
+          positions.  We deliberately don't reuse DeviceOrbit because it relies
+          on live RSSI history / pulsing that doesn't apply to a snapshot. */}
+      {layers.devices && replayMode && (replaySnapshot?.devices ?? [])
+        .filter((d) => d.pos)
+        .map((d) => (
+          <mesh key={d.mac} position={[d.pos!.x, 0.15, d.pos!.z]}>
+            <sphereGeometry args={[0.18, 16, 16]} />
+            <meshStandardMaterial
+              color={d.rssi > -55 ? "#34d399" : d.rssi > -75 ? "#fbbf24" : "#f87171"}
+              emissive={d.rssi > -55 ? "#10b981" : d.rssi > -75 ? "#f59e0b" : "#dc2626"}
+              emissiveIntensity={0.4}
+              transparent
+              opacity={Math.max(0.4, d.pos!.confidence)}
+            />
+          </mesh>
+        ))}
 
       <OrbitControls
         ref={controlsRef}

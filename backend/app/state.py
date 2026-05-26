@@ -11,6 +11,9 @@ from .event_bus import bus
 from .oui import vendor
 from .presence import presence_detector
 from .system_stats import system_monitor
+from . import persistence as p_mod
+import logging
+log = logging.getLogger(__name__)
 
 
 # Default radius of the sensor layout circle (and half-baseline for the 2-sensor case).
@@ -440,7 +443,89 @@ class State:
             elif t == "hb":
                 self._on_hb(ev)
 
+    # History snapshotting cadence.  5 s is a good trade-off between disk usage
+    # (~17 k rows/day) and replay granularity (you can scrub at 5 s steps).
+    _SNAPSHOT_INTERVAL_SEC = 5.0
+    # Threshold for emitting a "move" presence_event vs. silence (meters).
+    _PRESENCE_MOVE_THRESHOLD_M = 0.4
+
+    def _scene_payload(self) -> dict:
+        """Serialisable dict captured for replay.  Kept lean — only what
+        Scene3D needs to redraw devices, presence and sensors at a past
+        timestamp.  Schema version helps future migrations."""
+        devs = []
+        for d in self.devices.values():
+            pos = getattr(d, "position_2d", None)
+            try:
+                px = float(pos.x) if pos is not None else None
+                pz = float(pos.z) if pos is not None else None
+                pconf = float(pos.confidence) if pos is not None else 0.0
+            except Exception:
+                px = pz = None
+                pconf = 0.0
+            devs.append({
+                "mac": d.mac,
+                "rssi": d.last_rssi,
+                "last_seen": d.last_seen,
+                "pos": {"x": px, "z": pz, "confidence": pconf} if px is not None and pz is not None else None,
+            })
+        sens = []
+        for s in self.sensors.values():
+            sens.append({
+                "id": s.id, "x": s.position_x, "z": s.position_z,
+                "connected": s.connected,
+                "sniff_rate": s.sniff_rate, "csi_rate": s.csi_rate,
+            })
+        pr = presence_detector.state.to_dict() if presence_detector.state else None
+        return {"v": 1, "devices": devs, "sensors": sens, "presence": pr}
+
+    def _maybe_record_presence_transition(
+        self, now: float, prev_pos: tuple[float, float] | None,
+        prev_intensity: float,
+    ) -> tuple[tuple[float, float] | None, float]:
+        """If presence changed materially since last tick, push an event row.
+
+        Returns the *new* (position, intensity) so the caller can keep state
+        without us touching it.
+        """
+        curr = presence_detector.state
+        if curr is None:
+            return prev_pos, prev_intensity
+        curr_pos = curr.position
+        curr_intensity = float(curr.intensity)
+        if p_mod.persistence is None:
+            return curr_pos, curr_intensity
+
+        was_active = prev_pos is not None
+        is_active = curr_pos is not None
+        kind: str | None = None
+        if was_active and not is_active:
+            kind = "leave"
+        elif (not was_active) and is_active:
+            kind = "enter"
+        elif is_active and was_active and prev_pos is not None and curr_pos is not None:
+            dx = curr_pos[0] - prev_pos[0]
+            dz = curr_pos[1] - prev_pos[1]
+            if (dx * dx + dz * dz) ** 0.5 > self._PRESENCE_MOVE_THRESHOLD_M:
+                kind = "move"
+
+        if kind is not None:
+            x, z = curr_pos if curr_pos else (0.0, 0.0)
+            p_mod.persistence.record_presence_event(
+                now,
+                is_active,
+                float(x),
+                float(z),
+                curr_intensity,
+                len(curr.sensor_activity),
+                kind,
+            )
+        return curr_pos, curr_intensity
+
     async def maintenance_loop(self) -> None:
+        last_snapshot = 0.0
+        prev_pos: tuple[float, float] | None = None
+        prev_intensity = 0.0
         while True:
             await asyncio.sleep(1.0)
             self._update_rates()
@@ -450,6 +535,23 @@ class State:
                 system_monitor.update()
             except Exception:
                 pass  # best effort, never crash the loop
+            # Periodic scene snapshot.
+            now = time.time()
+            if p_mod.persistence is not None:
+                if now - last_snapshot >= self._SNAPSHOT_INTERVAL_SEC:
+                    last_snapshot = now
+                    try:
+                        p_mod.persistence.record_scene_snapshot(now, self._scene_payload())
+                    except Exception as e:
+                        log.debug("snapshot record failed: %s", e)
+                # Presence transitions are sampled every tick so we don't miss
+                # a fast enter/leave between two 5s snapshots.
+                try:
+                    prev_pos, prev_intensity = self._maybe_record_presence_transition(
+                        now, prev_pos, prev_intensity,
+                    )
+                except Exception as e:
+                    log.debug("presence transition record failed: %s", e)
 
 
 state = State()
