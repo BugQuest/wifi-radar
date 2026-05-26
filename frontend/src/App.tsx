@@ -10,6 +10,7 @@ import { SystemPanel } from "./components/SystemPanel";
 import { ConfigPanel } from "./components/ConfigPanel";
 import { CalibrationPanel } from "./components/CalibrationPanel";
 import { FirmwarePanel } from "./components/FirmwarePanel";
+import { LayersPanel } from "./components/LayersPanel";
 import { WsClient } from "./lib/ws";
 import { useStore } from "./store";
 
@@ -46,6 +47,7 @@ export default function App() {
           <ConfigPanel />
           <CalibrationPanel />
           <FirmwarePanel />
+          <LayersPanel />
         </div>
         {/* DeviceList: sidebar on desktop, full-screen overlay on mobile */}
         <DeviceList />

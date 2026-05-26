@@ -16,7 +16,21 @@ export interface PosLogEntry {
   conf: number;
 }
 
-export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config" | "calibration" | "firmware";
+export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config" | "calibration" | "firmware" | "layers";
+
+// Toggleable 3D-scene render layers.  Backed by zustand so any UI surface can
+// drive them.  Default to "everything visible" — the user pares down what they
+// don't need.
+export type LayerKey =
+  | "sensors"        // SensorDraggable nodes + range rings
+  | "devices"        // sniffed MACs as orbs
+  | "trails"         // motion trails for selected + multi-device
+  | "heatmap"        // ground-plane gaussian splat of activity
+  | "presence"       // presence centroid blob
+  | "grid"           // floor reference grid
+  | "rssiVectors";   // lines sensor ↔ device colored by RSSI
+
+export type LayerVisibility = Record<LayerKey, boolean>;
 
 // One in-progress capture window during path-loss calibration.
 export interface CalibrationCapture {
@@ -51,6 +65,7 @@ interface RadarStore {
   soloMode: boolean;
   focusTrigger: number;     // bumped to ask Scene3D to fly camera to selected
   panels: PanelVisibility;
+  layers: LayerVisibility;
   calibrationMode: boolean;   // when true, sensors can be dragged in the floor plane
   // Path-loss calibration runtime state
   pathLossCapture: CalibrationCapture | null;
@@ -62,6 +77,7 @@ interface RadarStore {
   setSoloMode: (v: boolean) => void;
   triggerFocus: () => void;
   togglePanel: (k: PanelKey) => void;
+  toggleLayer: (k: LayerKey) => void;
   toggleCalibration: () => void;
   updateSensorPosition: (sid: string, x: number, z: number) => void;
   startPathLossCapture: (sensor: string, mac: string, distance_m: number, duration_s: number) => void;
@@ -103,7 +119,8 @@ export const useStore = create<RadarStore>((set, get) => ({
   selectedPositions: [],
   soloMode: false,
   focusTrigger: 0,
-  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false, firmware: false },
+  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false, firmware: false, layers: false },
+  layers: { sensors: true, devices: true, trails: true, heatmap: true, presence: true, grid: true, rssiVectors: false },
   calibrationMode: false,
   pathLossCapture: null,
 
@@ -120,6 +137,7 @@ export const useStore = create<RadarStore>((set, get) => ({
   setSoloMode: (v) => set({ soloMode: v }),
   triggerFocus: () => set((s) => ({ focusTrigger: s.focusTrigger + 1 })),
   togglePanel: (k) => set((s) => ({ panels: { ...s.panels, [k]: !s.panels[k] } })),
+  toggleLayer: (k) => set((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } })),
   toggleCalibration: () => set((s) => ({ calibrationMode: !s.calibrationMode })),
   updateSensorPosition: (sid, x, z) =>
     set((s) => {
