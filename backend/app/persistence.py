@@ -1,6 +1,7 @@
 """DuckDB persistence with rolling parquet partitions for long-term history."""
 from __future__ import annotations
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -28,9 +29,31 @@ CREATE TABLE IF NOT EXISTS csi_events (
     channel     INTEGER,
     csi_data    BLOB
 );
+-- Periodic scene snapshots for the history / replay UI.  payload is a JSON
+-- doc containing devices[], sensors[], presence{} — anything Scene3D needs
+-- to redraw the scene at an arbitrary past timestamp.  Cheap to query, easy
+-- to evolve (just bump a schema_version inside the payload).
+CREATE TABLE IF NOT EXISTS scene_snapshots (
+    ts          DOUBLE PRIMARY KEY,
+    payload     JSON
+);
+-- Presence state transitions only (active <-> inactive, or significant
+-- centroid moves).  Used to populate the history list view without
+-- decoding every snapshot.
+CREATE TABLE IF NOT EXISTS presence_events (
+    ts          DOUBLE,
+    active      BOOLEAN,
+    x           DOUBLE,
+    z           DOUBLE,
+    confidence  DOUBLE,
+    sources     INTEGER,
+    kind        VARCHAR    -- "enter" / "leave" / "move"
+);
 CREATE INDEX IF NOT EXISTS idx_sniff_ts ON sniff_events (ts);
 CREATE INDEX IF NOT EXISTS idx_sniff_mac ON sniff_events (src_mac);
 CREATE INDEX IF NOT EXISTS idx_csi_ts ON csi_events (ts);
+CREATE INDEX IF NOT EXISTS idx_scene_ts ON scene_snapshots (ts);
+CREATE INDEX IF NOT EXISTS idx_presence_ts ON presence_events (ts);
 """
 
 
@@ -49,6 +72,10 @@ class Persistence:
         self.conn.execute(SCHEMA)
         self._sniff_buf: list[tuple] = []
         self._csi_buf: list[tuple] = []
+        # scene_snapshots and presence_events are smaller / less frequent, so we
+        # buffer them in a single list each and flush with the rest.
+        self._scene_buf: list[tuple] = []
+        self._presence_buf: list[tuple] = []
         self._last_roll = time.time()
         self._lock = asyncio.Lock()
 
@@ -67,10 +94,22 @@ class Persistence:
             int(ev.get("ch", 0)), blob,
         ))
 
+    def record_scene_snapshot(self, ts: float, payload: dict) -> None:
+        """Queue a scene snapshot.  Called from state's maintenance loop."""
+        self._scene_buf.append((ts, json.dumps(payload, separators=(",", ":"))))
+
+    def record_presence_event(
+        self, ts: float, active: bool, x: float, z: float,
+        confidence: float, sources: int, kind: str,
+    ) -> None:
+        self._presence_buf.append((ts, active, x, z, confidence, sources, kind))
+
     async def _flush(self) -> None:
         async with self._lock:
             sb, cb = self._sniff_buf, self._csi_buf
+            scb, pb = self._scene_buf, self._presence_buf
             self._sniff_buf, self._csi_buf = [], []
+            self._scene_buf, self._presence_buf = [], []
         if sb:
             await asyncio.to_thread(
                 self.conn.executemany,
@@ -82,6 +121,20 @@ class Persistence:
                 self.conn.executemany,
                 "INSERT INTO csi_events VALUES (?,?,?,?,?)",
                 cb,
+            )
+        if scb:
+            # ON CONFLICT(ts) means a snapshot at the same timestamp updates
+            # rather than erroring — harmless given the float ts uniqueness.
+            await asyncio.to_thread(
+                self.conn.executemany,
+                "INSERT OR REPLACE INTO scene_snapshots VALUES (?, ?)",
+                scb,
+            )
+        if pb:
+            await asyncio.to_thread(
+                self.conn.executemany,
+                "INSERT INTO presence_events VALUES (?,?,?,?,?,?,?)",
+                pb,
             )
 
     async def _maybe_roll(self) -> None:

@@ -20,6 +20,7 @@ const ENTRIES: ToolEntry[] = [
   { key: "calibration", icon: "📏", label: "Path-loss calibration" },
   { key: "firmware", icon: "🔥", label: "Firmware updater" },
   { key: "layers", icon: "🎛️", label: "3D layers" },
+  { key: "history", icon: "⏱", label: "History + replay" },
 ];
 
 export function ViewToolbar() {

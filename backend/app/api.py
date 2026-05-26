@@ -487,6 +487,67 @@ async def firmware_flash_route(payload: FlashPayload) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/plain")
 
 
+# -------- History / replay --------
+
+@router.get("/history/snapshots")
+def history_snapshots(
+    since_minutes: int = Query(default=60, ge=1, le=1440),
+    limit: int = Query(default=2000, ge=1, le=20000),
+) -> dict:
+    """List scene-snapshot timestamps within the time window (newest first).
+
+    Cheap to call — returns only timestamps so the UI can render a timeline.
+    Fetch a specific payload via /api/history/snapshot/{ts}.
+    """
+    if p.persistence is None:
+        return {"timestamps": []}
+    cutoff = time.time() - since_minutes * 60
+    rows = p.persistence.query(
+        f"SELECT ts FROM scene_snapshots WHERE ts > {cutoff} ORDER BY ts DESC LIMIT {limit}"
+    )
+    return {"timestamps": [float(r["ts"]) for r in rows]}
+
+
+@router.get("/history/snapshot")
+def history_snapshot_at(ts: float = Query(...)) -> dict:
+    """Return the snapshot at or just before `ts`."""
+    if p.persistence is None:
+        raise HTTPException(503, "persistence not initialized")
+    rows = p.persistence.query(
+        f"SELECT ts, payload FROM scene_snapshots WHERE ts <= {ts} ORDER BY ts DESC LIMIT 1"
+    )
+    if not rows:
+        raise HTTPException(404, "no snapshot at or before that timestamp")
+    row = rows[0]
+    payload = row["payload"]
+    # DuckDB JSON column comes back as a string; parse so the client gets json.
+    if isinstance(payload, str):
+        try:
+            payload = _json.loads(payload)
+        except _json.JSONDecodeError:
+            payload = {"raw": payload}
+    return {"ts": float(row["ts"]), "payload": payload}
+
+
+@router.get("/history/presence")
+def history_presence(
+    since_minutes: int = Query(default=60, ge=1, le=1440),
+    limit: int = Query(default=500, ge=1, le=5000),
+) -> dict:
+    """Presence state transitions (enter / leave / move) ordered newest first."""
+    if p.persistence is None:
+        return {"events": []}
+    cutoff = time.time() - since_minutes * 60
+    rows = p.persistence.query(
+        f"""SELECT ts, active, x, z, confidence, sources, kind
+            FROM presence_events
+            WHERE ts > {cutoff}
+            ORDER BY ts DESC
+            LIMIT {limit}"""
+    )
+    return {"events": rows}
+
+
 @router.get("/history/devices")
 def history_devices(since_minutes: int = Query(default=60, le=1440)) -> dict:
     if p.persistence is None:
