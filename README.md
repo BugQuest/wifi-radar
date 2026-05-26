@@ -425,25 +425,42 @@ sudo journalctl -u wifi-radar -f
 
 ## Flashage multi-capteurs
 
-Le firmware unique embarque un `CONFIG_RADAR_SENSOR_ID` (défaut `r0`) — le helper `flash_sid.sh` patche cette valeur, rebuild, flashe, restore. Il **stoppe le backend** au début, mais **ne le redémarre pas** (à toi de le faire après le dernier flash, pour pouvoir enchaîner les 3 sans interférence).
+Le firmware a maintenant **deux chemins de flashage**.
+
+### Cas courant : reflash d'un sensor déjà en place — panneau 🔥
+
+Après le tout premier flashage en USB direct (cf. plus bas), les mises à jour se font depuis l'interface. Ouvre le panneau **🔥 Firmware updater** :
+
+1. **Compile localement** sur ta machine de dev : `cd firmware && idf.py build` → produit `firmware/build/wifi-radar.bin` (~1 MB).
+2. **Upload** ce .bin dans le panneau (drag-drop ou file picker).
+3. **Choisis le sensor cible** dans la liste déroulante.
+4. **Clique 🔥 flash** — le backend libère le port USB de ce sensor, lance `esptool.py --chip esp32 ... write_flash 0x10000 <bin>`, **stream l'output en direct**, puis réouvre le port. Les autres sensors continuent leur pipeline pendant le flash (~20-30 s).
+
+Côté serveur ça appelle `POST /api/firmware/flash` qui retourne une `StreamingResponse` (texte ligne par ligne). Le port est verrouillé par un `asyncio.Lock` pendant l'opération pour qu'un deuxième flash sur la même cible attende.
+
+> Le `RADAR_ESPTOOL` env var permet d'indiquer un chemin absolu si l'IDF n'est pas exporté dans le shell du service systemd. La ligne pratique pour le service : `EnvironmentFile=/home/realitynauts/wifi-radar-backend/.env` avec `PATH=/home/realitynauts/esp/esp-idf/components/esptool_py/esptool:$PATH` ou similaire.
+
+### Renommer un sensor sans toucher au hardware
+
+Le sid (`r0`, `r1`...) est désormais stocké en NVS. Pour le changer :
+
+- Soit clique l'icône ✎ à côté du `sid` dans le panneau 📡 → input → ✓.
+- Soit envoie `POST /api/sensors/r0/rename` avec `{"new_sid":"kitchen"}`.
+
+L'ESP32 écrit en NVS, reboot, et revient sous le nouveau nom en ~3 s.
+
+### Cas initial : premier flash d'un ESP32 vierge — `flash_sid.sh`
+
+Pour le tout premier flashage (bootloader + partition table + app + sid de bootstrap), continue à passer par le helper en USB direct sur le Pi :
 
 ```bash
 cd ~/wifi-radar/firmware
-
-# Pour chaque ESP32 (un seul branché à la fois sur /dev/ttyUSB0) :
-./flash_sid.sh r0
-# débranche, branche le 2e
+./flash_sid.sh r0        # sid de bootstrap, sera réécrit en NVS au premier rename
 ./flash_sid.sh r1
-# débranche, branche le 3e
 ./flash_sid.sh r2
-
-# Quand tout est flashé, rebranche les 3 et relance le backend
-cd ~/wifi-radar/backend
-nohup .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 \
-    > /tmp/uvicorn.log 2>&1 < /dev/null & disown
 ```
 
-Une fois reflashés en NVS-aware, tous les changements WiFi se font **runtime** via l'UI ⚙️, plus besoin de reflasher.
+Une fois ce premier flash fait, le sensor a tout ce qu'il faut pour accepter les updates via le panneau 🔥 et les renames via 📡 — plus jamais besoin de débrancher.
 
 ---
 
@@ -815,6 +832,8 @@ wifi-radar/
 | Mobile / portrait UI | tablette, smartphone | ✅ done (responsive breakpoints) |
 | Sensor position calibration (drag) | trilatération basée sur les vraies positions | ✅ done (mode 📐) |
 | Ping périodique gateway (firmware) | CSI stable à ~20 Hz par défaut, ajustable depuis l'UI | ✅ done (panneau 📡 → champ `CSI ping`) |
+| Sid en NVS + rename runtime | renommer un sensor sans reflash | ✅ done (panneau 📡 → ✎ à côté du sid) |
+| Firmware update OTA-via-USB | flasher un sensor depuis l'UI sans SSH | ✅ done (panneau 🔥 upload .bin + flash) |
 | FFT 0.1–0.5 Hz sur amplitude CSI | détection de **respiration** | pending (le ping périodique est en place, prêt à exploiter) |
 | Clustering DBSCAN sur positions | grouper plusieurs corps en mouvement | pending |
 | Export Prometheus | dashboards Grafana | pending (facile) |
