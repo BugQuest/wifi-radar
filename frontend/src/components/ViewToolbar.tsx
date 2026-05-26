@@ -18,6 +18,7 @@ const ENTRIES: ToolEntry[] = [
   { key: "system", icon: "💻", label: "Pi system monitor" },
   { key: "config", icon: "⚙️", label: "WiFi configuration" },
   { key: "calibration", icon: "📏", label: "Path-loss calibration" },
+  { key: "firmware", icon: "🔥", label: "Firmware updater" },
 ];
 
 export function ViewToolbar() {

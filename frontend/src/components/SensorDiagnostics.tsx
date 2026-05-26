@@ -15,6 +15,74 @@ function age(ts: number): string {
   return `${(dt / 3600).toFixed(0)}h`;
 }
 
+function SidEditor({ sid }: { sid: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(sid);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!sid) return <span>—</span>;
+
+  const cancel = () => { setEditing(false); setDraft(sid); setErr(null); };
+  const apply = async () => {
+    const v = draft.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9_-]{0,15}$/.test(v)) {
+      setErr("[a-z0-9_-], starts with a letter, max 16");
+      return;
+    }
+    if (v === sid) { setEditing(false); return; }
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`${API}/sensors/${encodeURIComponent(sid)}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ new_sid: v }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.detail ?? `${r.status}`);
+      setEditing(false);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <>
+        <span className="truncate">{sid}</span>
+        <button
+          onClick={() => { setDraft(sid); setEditing(true); }}
+          className="text-zinc-500 hover:text-radar-accent text-[9px] uppercase tracking-wider ml-1"
+          title="Rename sensor (persists to NVS, ESP reboots)"
+        >
+          ✎
+        </button>
+      </>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 w-full">
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") apply();
+          if (e.key === "Escape") cancel();
+        }}
+        disabled={busy}
+        className="flex-1 min-w-0 bg-radar-bg/60 border border-radar-border rounded px-1 text-zinc-200 outline-none focus:border-radar-accent"
+      />
+      <button onClick={apply} disabled={busy} className="text-emerald-400 hover:text-emerald-300 text-[10px]">{busy ? "…" : "✓"}</button>
+      <button onClick={cancel} disabled={busy} className="text-zinc-500 hover:text-red-400 text-[10px]">✕</button>
+      {err && <span className="text-red-400 text-[9px] absolute mt-4">{err}</span>}
+    </span>
+  );
+}
+
 function statusOf(p: PortStats): { label: string; color: string } {
   const now = Date.now() / 1000;
   if (p.error) return { label: "ERROR", color: "#ef4444" };
@@ -152,7 +220,9 @@ export function SensorDiagnostics() {
                   {p.error && <div className="text-red-400 mt-0.5 break-all">{p.error}</div>}
                   <div className="grid grid-cols-3 gap-x-2 gap-y-0.5 mt-1 text-zinc-500">
                     <span>sid</span>
-                    <span className="col-span-2 text-radar-accent">{p.last_sid_seen || "—"}</span>
+                    <span className="col-span-2 text-radar-accent flex items-center gap-1">
+                      <SidEditor sid={p.last_sid_seen} />
+                    </span>
                     <span>bytes</span>
                     <span className="col-span-2 text-zinc-300 tabular-nums">{p.bytes_received.toLocaleString()}</span>
                     <span>lines</span>

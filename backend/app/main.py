@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import persistence as p_mod
 from .persistence import Persistence
-from .serial_reader import run_serial
+from . import serial_reader as serial_reader_mod
 from .state import state
 from . import oui
 from . import config as config_mod
@@ -62,14 +62,19 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(p_mod.persistence.flush_loop(), name="persist-flush"),
     ]
     for dev in devices:
-        tasks.append(asyncio.create_task(run_serial(dev, SERIAL_BAUD), name=f"serial-{dev}"))
+        # serial_reader_mod tracks these in its own registry so the firmware
+        # flash code can stop / restart a port without us holding the handle.
+        tasks.append(serial_reader_mod.start_port(dev, SERIAL_BAUD))
 
     log.info("started %d background tasks (%d serial readers)", len(tasks), len(devices))
     try:
         yield
     finally:
+        for dev in devices:
+            await serial_reader_mod.stop_port(dev)
         for t in tasks:
-            t.cancel()
+            if not t.done():
+                t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
 

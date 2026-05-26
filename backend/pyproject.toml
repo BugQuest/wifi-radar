@@ -12,6 +12,8 @@ dependencies = [
     "pyarrow>=18",
     "mac-vendor-lookup>=0.1.12",
     "pydantic>=2.10",
+    # Needed by FastAPI's UploadFile/File for multipart firmware uploads.
+    "python-multipart>=0.0.9",
 ]
 
 [build-system]

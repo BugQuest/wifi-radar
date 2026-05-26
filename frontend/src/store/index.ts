@@ -16,7 +16,7 @@ export interface PosLogEntry {
   conf: number;
 }
 
-export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config" | "calibration";
+export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config" | "calibration" | "firmware";
 
 // One in-progress capture window during path-loss calibration.
 export interface CalibrationCapture {
@@ -103,7 +103,7 @@ export const useStore = create<RadarStore>((set, get) => ({
   selectedPositions: [],
   soloMode: false,
   focusTrigger: 0,
-  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false },
+  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false, firmware: false },
   calibrationMode: false,
   pathLossCapture: null,
 

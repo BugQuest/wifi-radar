@@ -104,9 +104,14 @@ static void ping_start(void)
 #define NVS_NS "radar"
 #define SSID_MAX 33
 #define PW_MAX   65
+// Sensor ID — kept short so it fits inside JSON without bloating every line.
+// Stored in NVS so we can rename a sensor at runtime ({"cmd":"set_sid"}); the
+// Kconfig default is just the first-boot fallback.
+#define SID_MAX  17
 
 static char s_ssid[SSID_MAX];
 static char s_password[PW_MAX];
+static char s_sid[SID_MAX];
 
 static void nvs_load_string(const char *key, char *out, size_t out_sz, const char *fallback)
 {
@@ -224,7 +229,7 @@ static void IRAM_ATTR sniffer_cb(void *buf, wifi_promiscuous_pkt_type_t type)
     const char *kind = frame_type_str(hdr->frame_ctrl[0]);
 
     emit_line("{\"t\":\"sniff\",\"sid\":\"%s\",\"k\":\"%s\",\"rssi\":%d,\"ch\":%u,\"src\":\"%02x%02x%02x%02x%02x%02x\",\"dst\":\"%02x%02x%02x%02x%02x%02x\",\"len\":%d}\n",
-        CONFIG_RADAR_SENSOR_ID, kind, rx->rssi, rx->channel,
+        s_sid, kind, rx->rssi, rx->channel,
         hdr->addr2[0], hdr->addr2[1], hdr->addr2[2], hdr->addr2[3], hdr->addr2[4], hdr->addr2[5],
         hdr->addr1[0], hdr->addr1[1], hdr->addr1[2], hdr->addr1[3], hdr->addr1[4], hdr->addr1[5],
         rx->sig_len);
@@ -248,7 +253,7 @@ static void csi_cb(void *ctx, wifi_csi_info_t *info)
     char buf[LINE_MAX];
     int n = snprintf(buf, sizeof(buf),
         "{\"t\":\"csi\",\"sid\":\"%s\",\"src\":\"%02x%02x%02x%02x%02x%02x\",\"rssi\":%d,\"ch\":%u,\"len\":%d,\"data\":[",
-        CONFIG_RADAR_SENSOR_ID,
+        s_sid,
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
         rx->rssi, rx->channel, info->len);
     for (int i = 0; i < info->len && n < (int) sizeof(buf) - 8; ++i) {
@@ -379,10 +384,10 @@ static void cmd_emit_ack(const char *cmd_name, bool ok, const char *detail)
 {
     if (detail) {
         emit_line("{\"t\":\"ack\",\"sid\":\"%s\",\"cmd\":\"%s\",\"ok\":%s,\"detail\":\"%s\"}\n",
-            CONFIG_RADAR_SENSOR_ID, cmd_name, ok ? "true" : "false", detail);
+            s_sid, cmd_name, ok ? "true" : "false", detail);
     } else {
         emit_line("{\"t\":\"ack\",\"sid\":\"%s\",\"cmd\":\"%s\",\"ok\":%s}\n",
-            CONFIG_RADAR_SENSOR_ID, cmd_name, ok ? "true" : "false");
+            s_sid, cmd_name, ok ? "true" : "false");
     }
 }
 
@@ -408,6 +413,36 @@ static void handle_set_wifi(cJSON *root)
     }
 }
 
+static bool sid_valid(const char *sid)
+{
+    size_t n = sid ? strlen(sid) : 0;
+    if (n == 0 || n >= SID_MAX) return false;
+    // Conservative whitelist: lowercase letters, digits, hyphen, underscore.
+    // Anything else risks breaking JSON or shell-style consumers downstream.
+    for (size_t i = 0; i < n; ++i) {
+        char c = sid[i];
+        bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+static void handle_set_sid(cJSON *root)
+{
+    cJSON *sid = cJSON_GetObjectItem(root, "sid");
+    if (!cJSON_IsString(sid) || !sid_valid(sid->valuestring)) {
+        cmd_emit_ack("set_sid", false, "sid must match [a-z0-9_-]{1,16}");
+        return;
+    }
+    esp_err_t r = nvs_store_string("sid", sid->valuestring);
+    bool ok = (r == ESP_OK);
+    cmd_emit_ack("set_sid", ok, ok ? "saved, rebooting" : "nvs write failed");
+    if (ok) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    }
+}
+
 static void handle_command_line(const char *line)
 {
     cJSON *root = cJSON_Parse(line);
@@ -416,6 +451,8 @@ static void handle_command_line(const char *line)
     if (cJSON_IsString(cmd)) {
         if (strcmp(cmd->valuestring, "set_wifi") == 0) {
             handle_set_wifi(root);
+        } else if (strcmp(cmd->valuestring, "set_sid") == 0) {
+            handle_set_sid(root);
         } else if (strcmp(cmd->valuestring, "reboot") == 0) {
             cmd_emit_ack("reboot", true, NULL);
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -442,7 +479,7 @@ static void handle_command_line(const char *line)
 #endif
         } else if (strcmp(cmd->valuestring, "get_config") == 0) {
             emit_line("{\"t\":\"ack\",\"sid\":\"%s\",\"cmd\":\"get_config\",\"ok\":true,\"ssid\":\"%s\"}\n",
-                CONFIG_RADAR_SENSOR_ID, s_ssid);
+                s_sid, s_ssid);
         } else {
             cmd_emit_ack(cmd->valuestring, false, "unknown command");
         }
@@ -495,6 +532,9 @@ void app_main(void)
     // Load SSID/password from NVS, fall back to Kconfig defaults.
     nvs_load_string("ssid", s_ssid, sizeof(s_ssid), CONFIG_RADAR_WIFI_SSID);
     nvs_load_string("pw",   s_password, sizeof(s_password), CONFIG_RADAR_WIFI_PASSWORD);
+    // Sensor id: prefer NVS, fall back to the Kconfig default for first-boot or
+    // factory-fresh modules.
+    nvs_load_string("sid",  s_sid, sizeof(s_sid), CONFIG_RADAR_SENSOR_ID);
 
     uint8_t self_mac[6];
     esp_read_mac(self_mac, ESP_MAC_WIFI_STA);
@@ -531,11 +571,11 @@ void app_main(void)
 #endif
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             emit_line("{\"t\":\"hb\",\"sid\":\"%s\",\"connected\":true,\"ssid\":\"%s\",\"rssi\":%d,\"ch\":%d,\"drops\":%lu,\"ring_free\":%u,\"ping\":{\"recv\":%lu,\"lost\":%lu,\"ms\":%d}}\n",
-                CONFIG_RADAR_SENSOR_ID, ap.ssid, ap.rssi, ap.primary, (unsigned long) s_drops, (unsigned) free_bytes,
+                s_sid, ap.ssid, ap.rssi, ap.primary, (unsigned long) s_drops, (unsigned) free_bytes,
                 ping_recv, ping_lost, ping_ms);
         } else {
             emit_line("{\"t\":\"hb\",\"sid\":\"%s\",\"connected\":false,\"drops\":%lu,\"ring_free\":%u,\"ping\":{\"recv\":%lu,\"lost\":%lu,\"ms\":%d}}\n",
-                CONFIG_RADAR_SENSOR_ID, (unsigned long) s_drops, (unsigned) free_bytes,
+                s_sid, (unsigned long) s_drops, (unsigned) free_bytes,
                 ping_recv, ping_lost, ping_ms);
         }
     }

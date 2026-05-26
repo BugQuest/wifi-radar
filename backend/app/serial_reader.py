@@ -116,6 +116,54 @@ GARBAGE_BYTES_THRESHOLD = 4096
 SILENCE_TIMEOUT_SEC = 6.0
 
 
+# Registry of running reader tasks, keyed by device.  The supervisor functions
+# below let the firmware-flash code take exclusive ownership of a port (kill
+# the reader → run esptool → restart the reader).
+_tasks: dict[str, asyncio.Task] = {}
+# Per-device async lock so concurrent flash requests serialize cleanly.
+_port_locks: dict[str, asyncio.Lock] = {}
+
+
+def get_port_lock(device: str) -> asyncio.Lock:
+    lock = _port_locks.get(device)
+    if lock is None:
+        lock = asyncio.Lock()
+        _port_locks[device] = lock
+    return lock
+
+
+def start_port(device: str, baud: int) -> asyncio.Task:
+    """Spawn (or replace) the serial reader task for a device."""
+    existing = _tasks.get(device)
+    if existing is not None and not existing.done():
+        return existing
+    task = asyncio.create_task(run_serial(device, baud), name=f"serial-{device}")
+    _tasks[device] = task
+    return task
+
+
+async def stop_port(device: str) -> None:
+    """Cancel the reader task and wait for it to actually release the port.
+
+    Safe to call when no task is running (no-op).
+    """
+    task = _tasks.pop(device, None)
+    if task is None or task.done():
+        # Ensure transport is unregistered even if the task was already gone.
+        serial_writer.unregister_transport(device)
+        return
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+    serial_writer.unregister_transport(device)
+
+
+def known_ports() -> list[str]:
+    return sorted(_tasks.keys())
+
+
 async def run_serial(device: str, initial_baud: int) -> None:
     """Open serial and auto-rotate baud rates if the data doesn't parse.
 
