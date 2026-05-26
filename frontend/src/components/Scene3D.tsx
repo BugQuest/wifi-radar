@@ -14,6 +14,7 @@ import { HeatmapFloor } from "../three/HeatmapFloor";
 import { PresenceBlob } from "../three/PresenceBlob";
 import { MotionTrail } from "../three/MotionTrail";
 import { SelectedDeviceTrail } from "../three/SelectedDeviceTrail";
+import { RssiVectors } from "../three/RssiVectors";
 
 // Smoothly fly OrbitControls' target and camera to the selected device on
 // focusTrigger. Uses a time-bound easing (700ms easeOutCubic), so once the
@@ -89,6 +90,7 @@ export function Scene3D() {
   const sensors = useStore((s) => s.sensors);
   const csiHistory = useStore((s) => s.csiHistory);
   const calibrationMode = useStore((s) => s.calibrationMode);
+  const layers = useStore((s) => s.layers);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
   const sortedSensorIds = useMemo(() => [...sensors.keys()].sort(), [sensors]);
@@ -108,19 +110,20 @@ export function Scene3D() {
       <color attach="background" args={["#05070d"]} />
       <ambientLight intensity={0.2} />
 
-      <Floor />
-      <HeatmapFloor />
-      <RangeRings />
+      {layers.grid && <Floor />}
+      {layers.heatmap && <HeatmapFloor />}
+      {layers.sensors && <RangeRings />}
       <CSIField recent={csiHistory} />
-      <MotionTrail />
-      <PresenceBlob />
-      <SelectedDeviceTrail />
+      {layers.trails && <MotionTrail />}
+      {layers.presence && <PresenceBlob />}
+      {layers.trails && <SelectedDeviceTrail />}
+      {layers.rssiVectors && <RssiVectors />}
       <CameraFocus controlsRef={controlsRef} />
 
-      {sortedSensorIds.length === 0 && (
+      {layers.sensors && sortedSensorIds.length === 0 && (
         <SensorNode id="…" position={[0, 0, 0]} alive={false} connected={false} rssiToAp={0} rate={0} />
       )}
-      {sortedSensorIds.map((id) => {
+      {layers.sensors && sortedSensorIds.map((id) => {
         const s = sensors.get(id)!;
         // "alive" = we got events from this sid recently
         const alive = s.sniff_rate > 0 || s.csi_rate > 0;
@@ -138,7 +141,7 @@ export function Scene3D() {
         );
       })}
 
-      {[...devices.values()].map((d) => (
+      {layers.devices && [...devices.values()].map((d) => (
         <DeviceOrbit
           key={d.mac}
           device={d}
