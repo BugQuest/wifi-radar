@@ -23,15 +23,26 @@ PROPAGATION_K_DB = 15.0
 # 2D trilateration: log-distance path loss model.
 #   RSSI(d) = PATH_LOSS_RSSI_0 - 10 * PATH_LOSS_N * log10(d_meters)
 # These defaults match indoor 2.4 GHz around 1-5 m. Calibrate per environment.
+# Defaults; overridden at runtime by config.config_manager when calibrated.
 PATH_LOSS_RSSI_0 = -30.0   # RSSI at 1 m
 PATH_LOSS_N = 2.5          # exponent
+
+
+def _current_path_loss() -> tuple[float, float]:
+    """Pull the latest calibrated values from the config manager (if any)."""
+    from . import config as config_mod
+    cm = config_mod.config_manager
+    if cm is None:
+        return PATH_LOSS_RSSI_0, PATH_LOSS_N
+    return cm.path_loss_rssi_0, cm.path_loss_n
 
 # A sensor's RSSI for a device is "fresh" if seen within this many seconds.
 SENSOR_RSSI_FRESH_SEC = 8.0
 
 
 def _rssi_to_distance(rssi: float) -> float:
-    return 10.0 ** ((PATH_LOSS_RSSI_0 - rssi) / (10.0 * PATH_LOSS_N))
+    rssi_0, n = _current_path_loss()
+    return 10.0 ** ((rssi_0 - rssi) / (10.0 * n))
 
 
 def trilaterate(observations: list[tuple[float, float, float]]) -> dict[str, Any] | None:

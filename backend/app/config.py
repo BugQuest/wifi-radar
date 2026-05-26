@@ -48,6 +48,10 @@ class ConfigManager:
         self.active_name: str | None = None
         # User-calibrated sensor positions (overrides the auto-layout).
         self.sensor_positions: dict[str, SensorPosition] = {}
+        # Calibrated path-loss model: RSSI(d) = rssi_0 - 10*n*log10(d). Defaults
+        # are generic indoor 2.4 GHz; user can override via /api/path-loss.
+        self.path_loss_rssi_0: float = -30.0
+        self.path_loss_n: float = 2.5
         self.load()
 
     def load(self) -> None:
@@ -75,6 +79,11 @@ class ConfigManager:
                 for p in data.get("sensor_positions", [])
                 if p.get("sid")
             }
+            pl = data.get("path_loss") or {}
+            if "rssi_0" in pl:
+                self.path_loss_rssi_0 = float(pl["rssi_0"])
+            if "n" in pl:
+                self.path_loss_n = float(pl["n"])
         except (OSError, json.JSONDecodeError, ValueError) as e:
             log.warning("config load failed: %s", e)
 
@@ -83,10 +92,16 @@ class ConfigManager:
             "configs": [c.to_dict() for c in self.configs],
             "active_name": self.active_name,
             "sensor_positions": [p.to_dict() for p in self.sensor_positions.values()],
+            "path_loss": {"rssi_0": self.path_loss_rssi_0, "n": self.path_loss_n},
         }
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2))
         tmp.replace(self.path)
+
+    def set_path_loss(self, rssi_0: float, n: float) -> None:
+        self.path_loss_rssi_0 = float(rssi_0)
+        self.path_loss_n = float(n)
+        self.save()
 
     def set_sensor_position(self, sid: str, x: float, z: float) -> None:
         self.sensor_positions[sid] = SensorPosition(sid=sid, x=float(x), z=float(z))
