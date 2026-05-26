@@ -26,12 +26,30 @@ function colormap(v: number): [number, number, number, number] {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255), Math.round(a * 255)];
 }
 
-export function HeatmapFloor() {
-  const heatmap = useStore((s) => s.presence?.heatmap);
+interface HeatmapGrid {
+  size: number;
+  extent_m?: number;
+  values: number[] | ArrayLike<number>;
+}
+
+interface Props {
+  /**
+   * Optional override grid (used by the replay mode to render a historical
+   * heatmap from a snapshot).  When omitted, the component pulls the live
+   * grid from the presence store as before.
+   */
+  override?: HeatmapGrid | null;
+}
+
+export function HeatmapFloor({ override }: Props = {}) {
+  const liveHeatmap = useStore((s) => s.presence?.heatmap);
+  const heatmap = override ?? liveHeatmap;
   const texRef = useRef<THREE.DataTexture | null>(null);
 
   // Allocate texture once, update its data in place when heatmap arrives.
   const size = heatmap?.size ?? 40;
+  // Default extent matches the backend's HEATMAP_EXTENT_M.  Historical
+  // snapshots don't currently carry this — we assume the same world size.
   const extent = heatmap?.extent_m ?? 10;
 
   const texture = useMemo(() => {
