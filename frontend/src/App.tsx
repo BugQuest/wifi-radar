@@ -8,6 +8,7 @@ import { PresencePanel } from "./components/PresencePanel";
 import { SensorDiagnostics } from "./components/SensorDiagnostics";
 import { SystemPanel } from "./components/SystemPanel";
 import { ConfigPanel } from "./components/ConfigPanel";
+import { CalibrationPanel } from "./components/CalibrationPanel";
 import { WsClient } from "./lib/ws";
 import { useStore } from "./store";
 
@@ -42,6 +43,7 @@ export default function App() {
           <SensorDiagnostics />
           <SystemPanel />
           <ConfigPanel />
+          <CalibrationPanel />
         </div>
         {/* DeviceList: sidebar on desktop, full-screen overlay on mobile */}
         <DeviceList />

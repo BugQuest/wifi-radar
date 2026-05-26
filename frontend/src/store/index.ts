@@ -16,7 +16,17 @@ export interface PosLogEntry {
   conf: number;
 }
 
-export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config";
+export type PanelKey = "diagnostics" | "presence" | "list" | "waterfall" | "system" | "config" | "calibration";
+
+// One in-progress capture window during path-loss calibration.
+export interface CalibrationCapture {
+  sensor: string;       // sid (r0, r1...)
+  mac: string;          // colon-formatted MAC
+  distance_m: number;
+  t_start: number;
+  t_end: number;
+  samples: number[];    // raw RSSI values collected
+}
 
 export type PanelVisibility = Record<PanelKey, boolean>;
 
@@ -42,6 +52,8 @@ interface RadarStore {
   focusTrigger: number;     // bumped to ask Scene3D to fly camera to selected
   panels: PanelVisibility;
   calibrationMode: boolean;   // when true, sensors can be dragged in the floor plane
+  // Path-loss calibration runtime state
+  pathLossCapture: CalibrationCapture | null;
 
   setConnState: (s: WsState) => void;
   applyEvent: (ev: WsEvent) => void;
@@ -52,6 +64,8 @@ interface RadarStore {
   togglePanel: (k: PanelKey) => void;
   toggleCalibration: () => void;
   updateSensorPosition: (sid: string, x: number, z: number) => void;
+  startPathLossCapture: (sensor: string, mac: string, distance_m: number, duration_s: number) => void;
+  stopPathLossCapture: () => void;
 }
 
 const RSSI_HISTORY_LIMIT = 60;
@@ -89,8 +103,9 @@ export const useStore = create<RadarStore>((set, get) => ({
   selectedPositions: [],
   soloMode: false,
   focusTrigger: 0,
-  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false },
+  panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false },
   calibrationMode: false,
+  pathLossCapture: null,
 
   setConnState: (s) => set({ connState: s }),
   setSelected: (mac) =>
@@ -115,6 +130,20 @@ export const useStore = create<RadarStore>((set, get) => ({
       }
       return { sensors: next };
     }),
+  startPathLossCapture: (sensor, mac, distance_m, duration_s) => {
+    const now = Date.now() / 1000;
+    set({
+      pathLossCapture: {
+        sensor,
+        mac,
+        distance_m,
+        t_start: now,
+        t_end: now + duration_s,
+        samples: [],
+      },
+    });
+  },
+  stopPathLossCapture: () => set({ pathLossCapture: null }),
 
   applyEvent: (ev) => {
     switch (ev.t) {
@@ -155,6 +184,19 @@ export const useStore = create<RadarStore>((set, get) => ({
         if (macHex.length !== 12) return;
         const mac = macHex.match(/.{2}/g)!.join(":");
         const sid = ev.sid ?? "?";
+        // Path-loss calibration: while a capture is active, accumulate RSSI from
+        // the configured (sensor, mac). Auto-stop when t_end passes.
+        const cur0 = get();
+        if (cur0.pathLossCapture) {
+          const c = cur0.pathLossCapture;
+          if (ev.ts > c.t_end) {
+            set({ pathLossCapture: { ...c, t_end: c.t_end } });
+            // Mark as ended by clearing if no more samples expected. We keep
+            // samples for the panel to read; the panel decides when to drop.
+          } else if (sid === c.sensor && mac === c.mac) {
+            set({ pathLossCapture: { ...c, samples: [...c.samples, ev.rssi] } });
+          }
+        }
         const devices = new Map(get().devices);
         const now = ev.ts;
         const existing = devices.get(mac);

@@ -74,7 +74,7 @@ Côté navigateur :
 - **Capteurs draggables** en mode calibration (📐) pour ajuster leur position physique réelle.
 - **Devices** rendus avec **opacité = confiance de position** : 100% trilaterés, 45% bilaterés, 22% single-sensor (angle hashé), 15% sans capteur.
 - **PresenceBlob + MotionTrail + HeatmapFloor** : 3 calques visuels de la présence détectée par CSI.
-- **Panneaux flottants** draggables avec toolbar de toggle : Sensors diagnostic 📡, Presence 👤, Devices list 📋, CSI waterfall 🌊, Pi system 💻, WiFi config ⚙️.
+- **Panneaux flottants** draggables avec toolbar de toggle : Sensors diagnostic 📡, Presence 👤, Devices list 📋, CSI waterfall 🌊, Pi system 💻, WiFi config ⚙️, Path-loss calibration 📏.
 - **Device detail** au clic : RSSI par capteur, distance estimée, position 2D, vitesse, packet feed live, trilateration debug step-by-step (🔍).
 - **Mode Solo** 🔇 sur un device pour dim les autres + filtrer le CSI waterfall.
 - **Focus camera** 🎯 — vol vers le device sélectionné en 700 ms.
@@ -108,7 +108,7 @@ Algorithme :
 
 Avec **≥3 capteurs** voyant le même device avec RSSI frais (≤ 8 s) :
 
-- Modèle path-loss : `RSSI(d) = -30 − 10·n·log10(d_m)` (défaut `n = 2.5`, non calibré).
+- Modèle path-loss : `RSSI(d) = RSSI_0 − 10·n·log10(d_m)` — par défaut `RSSI_0 = -30 dBm @ 1m`, `n = 2.5`. **Ces deux paramètres sont calibratables in situ via le panneau 📏** (régression linéaire sur mesures à distances connues, persisté dans `wifi-configs.json`).
 - Distance estimée par capteur : `d_i = 10^((-30 − RSSI_i)/(10·n))`.
 - Cercles `(x − x_i)² + (z − z_i)² = d_i²` → on linéarise en soustrayant l'équation du capteur de référence → système `A·[x z]ᵀ = b` à N-1 équations.
 - Résolution moindres carrés : `(AᵀA)·v = Aᵀb` (matrice 2×2 inversée à la main).
@@ -283,15 +283,19 @@ L'AP (Pi en hotspot via dongle, ou ton routeur domestique) :
 6. Désactive 📐 pour locker.
 7. La trilatération utilise désormais tes vraies coordonnées.
 
-### Calibration optionnelle du path-loss
+### Calibration path-loss in situ (panneau 📏)
 
-Le modèle par défaut (`RSSI_0 = -30 dBm @ 1 m, n = 2.5`) marche en indoor générique mais peut être 50 % off chez toi. Pour un fit propre :
+Le modèle par défaut (`RSSI_0 = -30 dBm @ 1 m, n = 2.5`) marche en indoor générique mais peut être 50 % off chez toi. Le panneau **📏 Path-loss calibration** automatise le fit :
 
-1. Place un device de référence (ton téléphone en mode hotspot) à exactement 1 m d'un ESP32.
-2. Note le RSSI moyen sur 30 s dans la liste devices.
-3. Recommence à 3 m et 5 m.
-4. Fitte `RSSI_0` et `n` : `RSSI(d) = RSSI_0 - 10·n·log10(d)`.
-5. Met à jour `PATH_LOSS_RSSI_0` et `PATH_LOSS_N` dans `backend/app/state.py`.
+1. Place un device émetteur stable (téléphone en mode hotspot, montre connectée allumée…) à **distance connue** d'**un** capteur.
+2. Ouvre **📏** dans la toolbar topbar.
+3. Sélectionne le **sensor**, la **MAC cible** (dropdown trié par RSSI courant), saisis la **distance en m**, choisis la **durée** d'échantillonnage (5 s par défaut).
+4. Clique **📡 Sample 5s** : l'UI agrège tous les sniffs `(src=mac, sid=sensor)` depuis le WebSocket pendant la fenêtre → calcule moyenne et écart-type.
+5. Le point est ajouté au tableau. Déplace le device à une autre distance, recommence (idéalement **3 à 5 points** à des distances variées, par ex. 1 m / 2 m / 4 m / 7 m).
+6. Dès 2 points, la section **Fit** apparaît : régression linéaire client-side sur `(log10(d), RSSI)` → `RSSI_0`, `n`, **R²** coloré (vert > 0.9 = excellent, jaune > 0.7 = correct, rouge = ajouter d'autres points).
+7. **🚀 Apply to backend** → POST `/api/path-loss` → persisté + utilisé immédiatement par la trilatération (`state._rssi_to_distance` lit dynamiquement).
+
+Plus besoin de toucher au code source : les paramètres sont stockés dans `~/wifi-radar-data/wifi-configs.json` sous la clé `path_loss`.
 
 ---
 
@@ -442,7 +446,7 @@ Une fois reflashés en NVS-aware, tous les changements WiFi se font **runtime** 
 
 ### StatsBar (top)
 
-WS state, channel, AP RSSI, devices count, sniff/s, csi/s, totaux cumulés, pills par capteur avec rate + drops. À droite : **ViewToolbar** pour toggle chaque panneau + bouton **📐** mode calibration capteurs.
+WS state, channel, AP RSSI, devices count, sniff/s, csi/s, totaux cumulés, pills par capteur avec rate + drops. À droite : **ViewToolbar** pour toggle chaque panneau (📡 👤 📋 🌊 💻 ⚙ 📏) + bouton **📐** mode calibration capteurs (drag-and-drop).
 
 ### Scène 3D (centre)
 
@@ -481,7 +485,8 @@ WS state, channel, AP RSSI, devices count, sniff/s, csi/s, totaux cumulés, pill
 | 🌊 | CSIWaterfall | 64 sous-porteuses × N samples, colormap viridis, filtre solo |
 | 💻 | SystemPanel | CPU% global + per-core, temp avec gradient couleur, RAM, load avg, disk /, throttling Pi avec décodage clair |
 | ⚙ | ConfigPanel | Liste configs sauvées, scan AP modal (signal bars, channel, sécurité), formulaire add/edit/apply |
-| 📐 | (toolbar action) | Active le drag des capteurs en 3D pour calibrer |
+| 📏 | CalibrationPanel | Path-loss calibration : sample RSSI à distance connue, régression linéaire sur 3+ points, R², apply au backend |
+| 📐 | (toolbar action) | Active le drag des capteurs en 3D pour calibrer leur position physique (verrouille `OrbitControls`) |
 
 ### TrilaterationDebug modal (🔍)
 
@@ -533,6 +538,10 @@ GET  /api/system                      { cpu_percent, temperature_c, mem_used_pct
 GET  /api/ports                       { ports: [...] (per-port diagnostic) }
 GET  /api/csi/recent?n=64             { csi: [...] }
 GET  /api/history/devices?since_minutes=60   (DuckDB)
+
+GET  /api/path-loss                   { rssi_0, n } (current calibration)
+POST /api/path-loss                   body { rssi_0, n } → persist + trilateration uses new params
+GET  /api/oui-lookup/{mac}            proxy → macvendorlookup.com (cached)
 
 GET  /api/configs                     { configs, active_name }
 POST /api/configs                     body { name, ssid, password, notes } → upsert
@@ -595,7 +604,22 @@ En live :
 
 ## Persistence
 
-Tous les events sniff + CSI sont flushés par batch 5 s dans **DuckDB** `~/wifi-radar-data/radar.duckdb`. Rotation horaire vers `~/wifi-radar-data/parquet/sniff_*.parquet` et `csi_*.parquet` ZSTD. WiFi configs et calibration capteurs dans `~/wifi-radar-data/wifi-configs.json`.
+Tous les events sniff + CSI sont flushés par batch 5 s dans **DuckDB** `~/wifi-radar-data/radar.duckdb`. Rotation horaire vers `~/wifi-radar-data/parquet/sniff_*.parquet` et `csi_*.parquet` ZSTD.
+
+Le fichier `~/wifi-radar-data/wifi-configs.json` regroupe tout l'état non-événementiel persistant :
+
+```json
+{
+  "configs": [ ... ],                  // WiFi configs sauvées
+  "active_name": "Home WiFi",          // config courante
+  "sensor_positions": [                // calibration drag-and-drop 📐
+    { "sid": "r0", "x": -1.73, "z": 1.0 },
+    { "sid": "r1", "x":  1.73, "z": 1.0 },
+    { "sid": "r2", "x":  0.0,  "z": -2.0 }
+  ],
+  "path_loss": { "rssi_0": -32.4, "n": 2.78 }   // calibration 📏
+}
+```
 
 ```sql
 -- Requête sur l'historique long (CLI duckdb) :
@@ -647,7 +671,7 @@ Fuite de contextes WebGL après reload multiples. Ferme tous les onglets de l'ap
 ### Positions trilatération aberrantes (résidus > 10 m)
 
 - Baseline capteurs trop court → augmente la distance entre ESPs
-- Path-loss model désaligné → calibre `PATH_LOSS_N` in situ
+- Path-loss model désaligné → calibre via le panneau **📏** in situ (3+ points à distances connues)
 - Capteurs colinéaires → bouge-en un hors de l'axe
 - Filtre la confiance dans le frontend (déjà fait : opacity réduite si confidence basse)
 
@@ -669,7 +693,7 @@ Pour rester transparent sur ce qui est mesuré vs deviné :
 - Bilatération géométrique (math correcte)
 
 ### 🟡 Approximations heuristiques
-- Path-loss constants par défaut (`RSSI_0 = -30, n = 2.5`) — non calibrées
+- Path-loss constants — défaut `RSSI_0 = -30, n = 2.5`, **calibratable in situ via 📏** (régression linéaire). Sans calibration, ±50 % d'erreur indoor.
 - Confiance trilatération `exp(-residual/8) × ...` — empirique
 - Centroïde de présence pondéré par activity — pas une estimation bayésienne
 - Variance CSI = somme des `|a[j]-b[j]|` — pas la vraie variance complexe
@@ -681,10 +705,10 @@ Pour rester transparent sur ce qui est mesuré vs deviné :
 - Angle des devices avec 0 capteur frais → orbit origin, **opacité 15 %**
 - Devices avec position 2D fake = nettement plus fade visuellement que les trilaterés
 
-### 🔴 À calibrer manuellement
-- **Positions physiques des capteurs** — mode 📐 drag-and-drop sinon auto-layout (triangle théorique de 2 m)
-- **Path-loss params** in situ (cf. section Calibration)
-- **AP cible** (NVS persisté, configurable via ⚙)
+### 🔴 À calibrer (UI fournie, persisté côté backend)
+- **Positions physiques des capteurs** — mode 📐 drag-and-drop ; sinon auto-layout triangle théorique
+- **Path-loss params** — panneau 📏 in situ : sample 5s + régression linéaire sur ≥3 points
+- **AP cible** — NVS persisté côté ESP32, configurable via ⚙ (push UART instantané)
 
 ---
 
@@ -766,6 +790,7 @@ wifi-radar/
             ├── SensorDiagnostics.tsx     # diagnostic per-port + per-sensor
             ├── SystemPanel.tsx           # Pi resources (CPU/temp/RAM/throttle)
             ├── ConfigPanel.tsx           # WiFi configs CRUD + scan APs modal
+            ├── CalibrationPanel.tsx      # Path-loss calibration (sample + fit + apply)
             └── CSIWaterfall.tsx          # 64 subcarriers × N samples
 ```
 
@@ -775,14 +800,15 @@ wifi-radar/
 
 | Étape | Apport | Statut |
 |---|---|---|
+| Path-loss in situ calibration UI | meilleure conversion RSSI → distance | ✅ done (panneau 📏) |
+| Mobile / portrait UI | tablette, smartphone | ✅ done (responsive breakpoints) |
+| Sensor position calibration (drag) | trilatération basée sur les vraies positions | ✅ done (mode 📐) |
 | Ping périodique ESP32 → Pi (firmware) | CSI à 50 Hz pour détection mouvement fine | pending |
-| FFT 0.1–0.5 Hz sur amplitude CSI | détection de **respiration** | pending |
-| Path-loss in situ calibration UI | meilleure conversion RSSI → distance | pending |
+| FFT 0.1–0.5 Hz sur amplitude CSI | détection de **respiration** | pending (besoin du ping périodique avant) |
 | Clustering DBSCAN sur positions | grouper plusieurs corps en mouvement | pending |
-| TF Lite micro on-device | inférence ML présent/absent | gros |
-| Export Prometheus | dashboards Grafana | facile |
-| Mobile / portrait UI | tablette, smartphone | moyen |
-| Sensor height calibration (3D) | trilatération 3D vraie | gros |
+| Export Prometheus | dashboards Grafana | pending (facile) |
+| Sensor height calibration (3D) | trilatération 3D vraie | pending (gros) |
+| TF Lite micro on-device | inférence ML présent/absent | pending (très gros) |
 
 ---
 

@@ -17,6 +17,7 @@ const ENTRIES: ToolEntry[] = [
   { key: "waterfall", icon: "🌊", label: "CSI waterfall" },
   { key: "system", icon: "💻", label: "Pi system monitor" },
   { key: "config", icon: "⚙️", label: "WiFi configuration" },
+  { key: "calibration", icon: "📏", label: "Path-loss calibration" },
 ];
 
 export function ViewToolbar() {

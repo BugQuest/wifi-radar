@@ -130,6 +130,40 @@ def broadcast_command(payload: dict) -> dict:
     return {"ok": True, "pushed_to": reached, "count": len(reached)}
 
 
+# -------- Path-loss calibration --------
+
+class PathLossPayload(BaseModel):
+    rssi_0: float
+    n: float
+
+
+@router.get("/path-loss")
+def get_path_loss() -> dict:
+    if config_mod.config_manager is None:
+        raise HTTPException(503, "config manager not initialized")
+    return {
+        "rssi_0": config_mod.config_manager.path_loss_rssi_0,
+        "n": config_mod.config_manager.path_loss_n,
+    }
+
+
+@router.post("/path-loss")
+def set_path_loss(payload: PathLossPayload) -> dict:
+    if config_mod.config_manager is None:
+        raise HTTPException(503, "config manager not initialized")
+    # Sanity-check the values
+    if not (-100 <= payload.rssi_0 <= 0):
+        raise HTTPException(400, "rssi_0 must be in [-100, 0] dBm")
+    if not (1.0 <= payload.n <= 6.0):
+        raise HTTPException(400, "n must be in [1.0, 6.0] (typical 2.0 free-space to 4.0 obstructed)")
+    config_mod.config_manager.set_path_loss(payload.rssi_0, payload.n)
+    return {
+        "ok": True,
+        "rssi_0": config_mod.config_manager.path_loss_rssi_0,
+        "n": config_mod.config_manager.path_loss_n,
+    }
+
+
 # -------- Sensor calibration --------
 
 class SensorPositionPayload(BaseModel):
