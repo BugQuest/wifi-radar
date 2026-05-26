@@ -513,6 +513,9 @@ class State:
                 "position": {"x": pos[0], "z": pos[1]} if pos else None,
                 "intensity": float(pr_state.intensity),
                 "correlation": float(pr_state.correlation),
+                # Multi-body candidates at this instant.  Stateless across
+                # snapshots — persistent ids are the "sessions" feature.
+                "presences": [c.to_dict() for c in pr_state.presences],
             }
             # Quantised heatmap — same shape as PresenceState.to_dict()'s grid,
             # so the frontend can reuse the existing HeatmapFloor renderer.

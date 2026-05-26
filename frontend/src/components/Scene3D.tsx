@@ -15,6 +15,7 @@ import { PresenceBlob } from "../three/PresenceBlob";
 import { MotionTrail } from "../three/MotionTrail";
 import { SelectedDeviceTrail } from "../three/SelectedDeviceTrail";
 import { RssiVectors } from "../three/RssiVectors";
+import { PresencePeaks } from "../three/PresencePeaks";
 
 // Smoothly fly OrbitControls' target and camera to the selected device on
 // focusTrigger. Uses a time-bound easing (700ms easeOutCubic), so once the
@@ -121,10 +122,24 @@ export function Scene3D() {
       {layers.sensors && <RangeRings />}
       {!replayMode && layers.csiField && <CSIField recent={csiHistory} />}
       {layers.trails && !replayMode && <MotionTrail />}
-      {/* Live presence blob OR historical presence marker (sphere at the
-          snapshot's centroid). */}
-      {layers.presence && !replayMode && <PresenceBlob />}
-      {layers.presence && replayMode && replaySnapshot?.presence?.position && (
+      {/* Presence rendering:
+            - In live mode: prefer the multi-peak renderer when the backend
+              has any presences[] entries; fall back to the legacy aggregate
+              blob otherwise (keeps the single-body view when there's exactly
+              one diffuse hill).
+            - In replay mode: same logic, sourced from the snapshot. */}
+      {layers.presence && !replayMode && (
+        <>
+          <PresencePeaks />
+          {/* Aggregate blob only when no individual peaks are reported. */}
+          <PresenceBlob />
+        </>
+      )}
+      {layers.presence && replayMode && replaySnapshot?.presence && (
+        <PresencePeaks override={replaySnapshot.presence.presences ?? []} />
+      )}
+      {layers.presence && replayMode && replaySnapshot?.presence?.position
+       && !(replaySnapshot.presence.presences?.length) && (
         <mesh position={[replaySnapshot.presence.position.x, 0.2, replaySnapshot.presence.position.z]}>
           <sphereGeometry args={[0.25, 24, 24]} />
           <meshStandardMaterial color="#fb923c" emissive="#fb923c" emissiveIntensity={0.5} transparent opacity={0.85} />

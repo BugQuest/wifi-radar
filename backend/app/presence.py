@@ -33,6 +33,91 @@ HEATMAP_SPLAT_SIGMA = 1.5    # gaussian splat sigma in cells
 
 
 @dataclass
+class PresenceCandidate:
+    """One local maximum in the heatmap — a candidate human body.
+
+    Stateless across frames; persistent ID tracking is the "sessions" feature
+    coming later.  For now the frontend renders one blob per candidate.
+    """
+    x: float                # world coordinates, meters
+    z: float
+    intensity: float        # raw heatmap value at the peak
+    confidence: float       # peak prominence (≈ peak height / global max), 0..1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"x": self.x, "z": self.z, "intensity": self.intensity, "confidence": self.confidence}
+
+
+# Peak detection parameters
+PEAK_MIN_REL_INTENSITY = 0.25   # peak height must be ≥ this fraction of heatmap_max
+PEAK_MIN_DIST_CELLS = 4          # NMS radius (~2 m at 0.5 m / cell)
+PEAK_MAX_COUNT = 6               # cap on returned candidates
+
+
+def _find_peaks(grid: list[list[float]], grid_max: float) -> list[PresenceCandidate]:
+    """Local-maxima detection with non-max suppression.
+
+    Treats the 40×40 heatmap as an image.  A cell is a local max if it is
+    strictly greater than its 8 neighbours and clears a global threshold
+    derived from ``grid_max``.  Peaks are then NMS-suppressed so two
+    candidates aren't reported at adjacent cells.
+
+    Returns up to PEAK_MAX_COUNT candidates, sorted by intensity descending.
+    """
+    if grid_max <= 0:
+        return []
+    H = len(grid)
+    if H == 0:
+        return []
+    W = len(grid[0])
+    threshold = grid_max * PEAK_MIN_REL_INTENSITY
+    raw: list[tuple[float, int, int]] = []
+    # Skip the 1-cell border — local-max on a border cell is unreliable.
+    for i in range(1, H - 1):
+        row = grid[i]
+        prev_row = grid[i - 1]
+        next_row = grid[i + 1]
+        for j in range(1, W - 1):
+            v = row[j]
+            if v < threshold:
+                continue
+            if (
+                v > prev_row[j - 1] and v > prev_row[j] and v > prev_row[j + 1] and
+                v > row[j - 1]                          and v > row[j + 1] and
+                v > next_row[j - 1] and v > next_row[j] and v > next_row[j + 1]
+            ):
+                raw.append((v, i, j))
+    if not raw:
+        return []
+    # NMS: greedy — sort by intensity, drop any peak too close to a stronger one.
+    raw.sort(reverse=True)
+    kept: list[tuple[float, int, int]] = []
+    for v, i, j in raw:
+        too_close = False
+        for _, ki, kj in kept:
+            if ((i - ki) ** 2 + (j - kj) ** 2) ** 0.5 < PEAK_MIN_DIST_CELLS:
+                too_close = True
+                break
+        if not too_close:
+            kept.append((v, i, j))
+            if len(kept) >= PEAK_MAX_COUNT:
+                break
+    # Convert (i, j) cell indices to world coordinates.  Mirrors the inverse
+    # of _splat_at(); the cell centre at (i, j) maps to
+    #   x = (i + 0.5) / HEATMAP_SIZE * 2*extent − extent
+    out: list[PresenceCandidate] = []
+    for v, i, j in kept:
+        x = (i + 0.5) / HEATMAP_SIZE * 2 * HEATMAP_EXTENT_M - HEATMAP_EXTENT_M
+        z = (j + 0.5) / HEATMAP_SIZE * 2 * HEATMAP_EXTENT_M - HEATMAP_EXTENT_M
+        out.append(PresenceCandidate(
+            x=x, z=z,
+            intensity=v,
+            confidence=min(1.0, v / grid_max),
+        ))
+    return out
+
+
+@dataclass
 class PresenceState:
     sensor_activity: dict[str, float] = field(default_factory=dict)
     position: tuple[float, float] | None = None       # (x, z) in meters
@@ -45,6 +130,9 @@ class PresenceState:
         default_factory=lambda: [[0.0] * HEATMAP_SIZE for _ in range(HEATMAP_SIZE)]
     )
     heatmap_max: float = 0.0
+    # Multi-body candidates: local maxima of the heatmap.  Recomputed each
+    # tick, stateless (no persistent IDs yet).
+    presences: list[PresenceCandidate] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         # Quantize heatmap to int8 [0..127] for compact transport. Max is computed
@@ -70,6 +158,7 @@ class PresenceState:
                 "max": self.heatmap_max,
                 "values": flat,
             },
+            "presences": [p.to_dict() for p in self.presences],
         }
 
 
@@ -203,6 +292,10 @@ class PresenceDetector:
                         if grid[ii][jj] > new_max:
                             new_max = grid[ii][jj]
         self.state.heatmap_max = new_max
+        # Refresh multi-body candidates from the updated grid.  Cheap (a single
+        # pass over 1600 cells); called at the same cadence as the rest of the
+        # detector.
+        self.state.presences = _find_peaks(grid, new_max)
 
 
 presence_detector = PresenceDetector()

@@ -55,7 +55,12 @@ export interface SnapshotPayload {
   v: number;
   devices: SnapshotDevice[];
   sensors: SnapshotSensor[];
-  presence: { position?: { x: number; z: number } | null; intensity?: number; correlation?: number } | null;
+  presence: {
+    position?: { x: number; z: number } | null;
+    intensity?: number;
+    correlation?: number;
+    presences?: { x: number; z: number; intensity: number; confidence: number }[];
+  } | null;
   heatmap?: SnapshotHeatmap | null;
 }
 

@@ -8,6 +8,10 @@ import { useStore } from "../store";
 // with intensity, color shifts from blue (low) → orange (high). Lerps smoothly.
 export function PresenceBlob() {
   const presence = useStore((s) => s.presence);
+  // When the backend reports individual presence candidates, the
+  // PresencePeaks component takes over.  Hiding the aggregate blob avoids
+  // visual duplication.
+  const hasPeaks = (presence?.presences?.length ?? 0) > 0;
   const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
   const ringRef = useRef<THREE.Mesh>(null);
@@ -18,7 +22,7 @@ export function PresenceBlob() {
     if (!groupRef.current || !meshRef.current || !matRef.current) return;
     const t = clock.getElapsedTime();
 
-    if (!presence?.position) {
+    if (hasPeaks || !presence?.position) {
       // Fade out
       matRef.current.opacity += (0 - matRef.current.opacity) * 0.1;
       if (ringMatRef.current) ringMatRef.current.opacity += (0 - ringMatRef.current.opacity) * 0.1;
@@ -63,7 +67,7 @@ export function PresenceBlob() {
         <ringGeometry args={[0.4, 0.45, 32]} />
         <meshBasicMaterial ref={ringMatRef} color="#22d3ee" transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
       </mesh>
-      {presence?.position && presence.intensity > 0.1 && (
+      {!hasPeaks && presence?.position && presence.intensity > 0.1 && (
         <Html position={[0, 0.4, 0]} center distanceFactor={12} style={{ pointerEvents: "none" }}>
           <div className="px-2 py-0.5 bg-radar-bg/90 border border-radar-accent/50 rounded text-[10px] font-mono whitespace-nowrap">
             <span className="text-radar-accent">presence</span>

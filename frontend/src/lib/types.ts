@@ -92,6 +92,13 @@ export interface HeatmapState {
   values: number[];    // size*size int8 row-major (x-axis = i, z-axis = j)
 }
 
+export interface PresenceCandidate {
+  x: number;
+  z: number;
+  intensity: number;     // raw heatmap value at the peak
+  confidence: number;    // 0..1 (peak / global max)
+}
+
 export interface PresenceState {
   sensor_activity: Record<string, number>;
   position: { x: number; z: number } | null;
@@ -100,6 +107,9 @@ export interface PresenceState {
   history: { ts: number; x: number; z: number; i: number }[];
   last_update: number;
   heatmap?: HeatmapState;
+  // Multi-body candidates — N local maxima of the heatmap, sorted by intensity.
+  // Stateless across frames (persistent IDs come with the "sessions" feature).
+  presences?: PresenceCandidate[];
 }
 
 export interface SystemStats {

@@ -68,6 +68,26 @@ export function PresencePanel() {
         </div>
         <span className="text-zinc-300 w-12 text-right">{corrLabel}</span>
       </div>
+      {/* Multi-body candidates detected from heatmap peaks. */}
+      {presence.presences && presence.presences.length > 0 && (
+        <div className="mb-2">
+          <div className="text-[10px] text-zinc-500 mb-1">
+            bodies detected <span className="text-radar-accent">{presence.presences.length}</span>
+          </div>
+          {presence.presences.map((p, i) => (
+            <div key={`${p.x.toFixed(2)}-${p.z.toFixed(2)}-${i}`} className="flex items-center gap-2 text-[10px] mb-0.5">
+              <span className="w-2 h-2 rounded-full" style={{ background: ["#22d3ee","#a78bfa","#fb923c","#34d399","#f472b6","#facc15"][i % 6] }} />
+              <span className="text-zinc-300 w-4">#{i + 1}</span>
+              <span className="text-zinc-500 tabular-nums">
+                ({p.x.toFixed(1)}, {p.z.toFixed(1)})m
+              </span>
+              <span className="ml-auto text-zinc-400 tabular-nums">
+                conf {(p.confidence * 100).toFixed(0)}%
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="text-[10px] text-zinc-500 mb-1">activity / sensor</div>
       {sids.map((sid) => {
         const a = presence.sensor_activity[sid] ?? 0;
