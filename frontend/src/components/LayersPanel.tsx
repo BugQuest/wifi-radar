@@ -17,6 +17,7 @@ const ROWS: LayerRow[] = [
   { key: "presence",    icon: "👤", label: "Presence",      hint: "Centroïde de présence (blob)" },
   { key: "grid",        icon: "▦",  label: "Grid / sol",    hint: "Quadrillage de référence" },
   { key: "rssiVectors", icon: "📶", label: "RSSI vectors",  hint: "Lignes capteur↔device, couleur=RSSI" },
+  { key: "csiField",    icon: "🌊", label: "CSI field",     hint: "Visualisation ruban des derniers CSI events" },
 ];
 
 export function LayersPanel() {

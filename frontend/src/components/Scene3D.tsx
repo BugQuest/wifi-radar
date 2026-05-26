@@ -119,7 +119,7 @@ export function Scene3D() {
         <HeatmapFloor override={replaySnapshot.heatmap} />
       )}
       {layers.sensors && <RangeRings />}
-      {!replayMode && <CSIField recent={csiHistory} />}
+      {!replayMode && layers.csiField && <CSIField recent={csiHistory} />}
       {layers.trails && !replayMode && <MotionTrail />}
       {/* Live presence blob OR historical presence marker (sphere at the
           snapshot's centroid). */}

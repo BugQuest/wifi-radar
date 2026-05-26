@@ -69,7 +69,8 @@ export type LayerKey =
   | "heatmap"        // ground-plane gaussian splat of activity
   | "presence"       // presence centroid blob
   | "grid"           // floor reference grid
-  | "rssiVectors";   // lines sensor ↔ device colored by RSSI
+  | "rssiVectors"    // lines sensor ↔ device colored by RSSI
+  | "csiField";      // ribbon visualisation of recent CSI events
 
 export type LayerVisibility = Record<LayerKey, boolean>;
 
@@ -171,7 +172,7 @@ export const useStore = create<RadarStore>((set, get) => ({
   soloMode: false,
   focusTrigger: 0,
   panels: { diagnostics: true, presence: true, list: true, waterfall: true, system: true, config: false, calibration: false, firmware: false, layers: false, history: false },
-  layers: { sensors: true, devices: true, trails: true, heatmap: true, presence: true, grid: true, rssiVectors: false },
+  layers: { sensors: true, devices: true, trails: true, heatmap: true, presence: true, grid: true, rssiVectors: false, csiField: true },
   replayMode: false,
   replayAt: null,
   replaySnapshot: null,
