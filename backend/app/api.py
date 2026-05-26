@@ -21,6 +21,7 @@ from .config import WifiConfig, ConfigManager
 from . import serial_writer
 from . import persistence as p
 from . import firmware_flash
+from . import oui
 
 router = APIRouter()
 
@@ -280,9 +281,21 @@ def clear_sensor_position(sid: str) -> dict:
 
 
 # -------- MAC vendor lookup proxy --------
-# macvendorlookup.com does not send CORS headers, so the browser can't call
-# them directly. We proxy and cache in-memory to limit upstream traffic.
+# macvendorlookup.com doesn't send CORS headers, so the browser can't call them
+# directly.  We proxy + cache in-memory to limit upstream traffic.  The upstream
+# is flaky: it occasionally returns an empty body, a 204, a rate-limit page in
+# HTML, or just times out.  We absorb all of those silently and fall back to the
+# offline OUI table (mac-vendor-lookup) loaded at startup — the user still gets
+# a vendor name, just less detailed than what the API would have returned.
 _oui_cache: dict[str, dict] = {}
+
+
+def _local_oui_payload(mac: str) -> dict:
+    """Build a shaped result from the in-memory OUI table (offline)."""
+    vendor = oui.vendor(mac)
+    if vendor and vendor != "Unknown":
+        return {"mac": mac, "results": [{"company": vendor, "source": "offline-oui"}]}
+    return {"mac": mac, "results": [], "source": "offline-oui"}
 
 
 @router.get("/oui-lookup/{mac}")
@@ -297,19 +310,45 @@ async def oui_lookup(mac: str) -> dict:
 
     url = f"https://www.macvendorlookup.com/api/v2/{cleaned}"
 
-    def _fetch() -> object:
+    def _fetch() -> tuple[int, bytes, str]:
+        """Return (status, body, content_type).  Never raises for HTTP errors."""
         req = _urlreq.Request(url, headers={"User-Agent": "wifi-radar/1.0", "Accept": "application/json"})
-        with _urlreq.urlopen(req, timeout=8) as r:
-            return _json.loads(r.read())
+        try:
+            with _urlreq.urlopen(req, timeout=8) as r:
+                return r.status, r.read(), (r.headers.get("Content-Type") or "")
+        except _urlreq.HTTPError as e:
+            # 4xx / 5xx from upstream — still return body so we can log if useful.
+            return e.code, e.read() if hasattr(e, "read") else b"", e.headers.get("Content-Type", "") if e.headers else ""
 
+    data: object = None
+    upstream_note: str | None = None
     try:
-        data = await asyncio.to_thread(_fetch)
+        status, body, ctype = await asyncio.to_thread(_fetch)
+        if status >= 400:
+            upstream_note = f"upstream HTTP {status}"
+        elif not body or not body.strip():
+            upstream_note = "upstream returned empty body"
+        elif "json" not in ctype.lower() and not body.lstrip().startswith((b"[", b"{")):
+            # Got an HTML rate-limit page or similar.
+            upstream_note = f"upstream non-json content-type: {ctype}"
+        else:
+            try:
+                data = _json.loads(body)
+            except _json.JSONDecodeError as e:
+                upstream_note = f"invalid upstream json: {e}"
     except URLError as e:
-        raise HTTPException(502, f"upstream unreachable: {e.reason if hasattr(e, 'reason') else e}")
-    except _json.JSONDecodeError as e:
-        raise HTTPException(502, f"invalid upstream json: {e}")
+        upstream_note = f"upstream unreachable: {e.reason if hasattr(e, 'reason') else e}"
     except Exception as e:  # noqa: BLE001 - keep the proxy robust
-        raise HTTPException(502, f"lookup failed: {e}")
+        upstream_note = f"lookup failed: {e}"
+
+    if data is None:
+        # Fall back to the offline table.  Always cache so we don't pound the API
+        # for the same MAC over and over when it's flaky.
+        payload = _local_oui_payload(cleaned)
+        if upstream_note:
+            payload["upstream_note"] = upstream_note
+        _oui_cache[key] = payload
+        return payload
 
     if isinstance(data, list):
         results = data
@@ -317,7 +356,7 @@ async def oui_lookup(mac: str) -> dict:
         results = [data]
     else:
         results = []
-    payload = {"mac": cleaned, "results": results}
+    payload = {"mac": cleaned, "results": results, "source": "macvendorlookup"}
     _oui_cache[key] = payload
     return payload
 
