@@ -17,11 +17,85 @@
 #include "driver/uart.h"
 #include "cJSON.h"
 #include "rom/ets_sys.h"
+#include "ping/ping_sock.h"
+#include "lwip/ip_addr.h"
 
 static const char *TAG = "radar";
 
 static EventGroupHandle_t s_wifi_events;
 #define WIFI_CONNECTED_BIT BIT0
+
+// =========================================================================
+//  Gateway ping — periodic ICMP echo to keep the radio busy and stabilize
+//  the CSI reporting rate.  Frames are also visible on-channel to the other
+//  sensors in promiscuous mode, so a single ping session per sensor boosts
+//  CSI throughput for the whole fleet.
+// =========================================================================
+
+#if CONFIG_RADAR_PING_ENABLED
+static esp_ping_handle_t s_ping = NULL;
+static volatile uint32_t s_ping_recv = 0;
+static volatile uint32_t s_ping_lost = 0;
+static int s_ping_interval_ms = CONFIG_RADAR_PING_INTERVAL_MS;
+static esp_netif_t *s_sta_netif = NULL;
+
+static void ping_on_success(esp_ping_handle_t hdl, void *args)
+{
+    (void) hdl; (void) args;
+    s_ping_recv++;
+}
+
+static void ping_on_timeout(esp_ping_handle_t hdl, void *args)
+{
+    (void) hdl; (void) args;
+    s_ping_lost++;
+}
+
+static void ping_stop(void)
+{
+    if (s_ping) {
+        esp_ping_stop(s_ping);
+        esp_ping_delete_session(s_ping);
+        s_ping = NULL;
+    }
+}
+
+static void ping_start(void)
+{
+    if (!s_sta_netif) return;
+    ping_stop();
+
+    esp_netif_ip_info_t ip = { 0 };
+    if (esp_netif_get_ip_info(s_sta_netif, &ip) != ESP_OK || ip.gw.addr == 0) {
+        ESP_LOGW(TAG, "ping_start: no gateway yet");
+        return;
+    }
+
+    esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
+    cfg.target_addr.type = IPADDR_TYPE_V4;
+    cfg.target_addr.u_addr.ip4.addr = ip.gw.addr;
+    cfg.count = 0;                       // forever
+    cfg.interval_ms = s_ping_interval_ms;
+    cfg.timeout_ms = 1000;
+    cfg.task_stack_size = 4096;
+    cfg.task_prio = 3;
+
+    esp_ping_callbacks_t cbs = {
+        .on_ping_success = ping_on_success,
+        .on_ping_timeout = ping_on_timeout,
+        .on_ping_end = NULL,
+        .cb_args = NULL,
+    };
+    if (esp_ping_new_session(&cfg, &cbs, &s_ping) == ESP_OK && s_ping) {
+        esp_ping_start(s_ping);
+        ESP_LOGI(TAG, "ping started → gw=" IPSTR " every %d ms",
+            IP2STR(&ip.gw), s_ping_interval_ms);
+    } else {
+        s_ping = NULL;
+        ESP_LOGW(TAG, "ping session create failed");
+    }
+}
+#endif  // CONFIG_RADAR_PING_ENABLED
 
 // =========================================================================
 //  NVS helpers — persistent SSID/password storage
@@ -204,6 +278,10 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *) data;
         ESP_LOGI(TAG, "got IP " IPSTR, IP2STR(&evt->ip_info.ip));
         xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
+#if CONFIG_RADAR_PING_ENABLED
+        s_sta_netif = evt->esp_netif;
+        ping_start();
+#endif
     }
 }
 
@@ -344,6 +422,24 @@ static void handle_command_line(const char *line)
             esp_restart();
         } else if (strcmp(cmd->valuestring, "ping") == 0) {
             cmd_emit_ack("ping", true, NULL);
+        } else if (strcmp(cmd->valuestring, "set_ping_rate") == 0) {
+#if CONFIG_RADAR_PING_ENABLED
+            cJSON *ms = cJSON_GetObjectItem(root, "interval_ms");
+            if (!cJSON_IsNumber(ms)) {
+                cmd_emit_ack("set_ping_rate", false, "missing interval_ms");
+            } else {
+                int v = (int) ms->valueint;
+                if (v < 10 || v > 5000) {
+                    cmd_emit_ack("set_ping_rate", false, "out of range 10..5000");
+                } else {
+                    s_ping_interval_ms = v;
+                    ping_start();
+                    cmd_emit_ack("set_ping_rate", true, NULL);
+                }
+            }
+#else
+            cmd_emit_ack("set_ping_rate", false, "ping not built in");
+#endif
         } else if (strcmp(cmd->valuestring, "get_config") == 0) {
             emit_line("{\"t\":\"ack\",\"sid\":\"%s\",\"cmd\":\"get_config\",\"ok\":true,\"ssid\":\"%s\"}\n",
                 CONFIG_RADAR_SENSOR_ID, s_ssid);
@@ -424,12 +520,23 @@ void app_main(void)
         wifi_ap_record_t ap = { 0 };
         UBaseType_t free_bytes = 0;
         vRingbufferGetInfo(s_ring, NULL, NULL, NULL, NULL, &free_bytes);
+#if CONFIG_RADAR_PING_ENABLED
+        unsigned long ping_recv = s_ping_recv;
+        unsigned long ping_lost = s_ping_lost;
+        int ping_ms = s_ping_interval_ms;
+#else
+        unsigned long ping_recv = 0;
+        unsigned long ping_lost = 0;
+        int ping_ms = 0;
+#endif
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-            emit_line("{\"t\":\"hb\",\"sid\":\"%s\",\"connected\":true,\"ssid\":\"%s\",\"rssi\":%d,\"ch\":%d,\"drops\":%lu,\"ring_free\":%u}\n",
-                CONFIG_RADAR_SENSOR_ID, ap.ssid, ap.rssi, ap.primary, (unsigned long) s_drops, (unsigned) free_bytes);
+            emit_line("{\"t\":\"hb\",\"sid\":\"%s\",\"connected\":true,\"ssid\":\"%s\",\"rssi\":%d,\"ch\":%d,\"drops\":%lu,\"ring_free\":%u,\"ping\":{\"recv\":%lu,\"lost\":%lu,\"ms\":%d}}\n",
+                CONFIG_RADAR_SENSOR_ID, ap.ssid, ap.rssi, ap.primary, (unsigned long) s_drops, (unsigned) free_bytes,
+                ping_recv, ping_lost, ping_ms);
         } else {
-            emit_line("{\"t\":\"hb\",\"sid\":\"%s\",\"connected\":false,\"drops\":%lu,\"ring_free\":%u}\n",
-                CONFIG_RADAR_SENSOR_ID, (unsigned long) s_drops, (unsigned) free_bytes);
+            emit_line("{\"t\":\"hb\",\"sid\":\"%s\",\"connected\":false,\"drops\":%lu,\"ring_free\":%u,\"ping\":{\"recv\":%lu,\"lost\":%lu,\"ms\":%d}}\n",
+                CONFIG_RADAR_SENSOR_ID, (unsigned long) s_drops, (unsigned) free_bytes,
+                ping_recv, ping_lost, ping_ms);
         }
     }
 }

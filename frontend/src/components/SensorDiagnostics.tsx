@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "../store";
 import { useDraggable } from "../lib/useDraggable";
 import type { PortStats } from "../lib/types";
+
+const PRO = window.location.protocol === "https:" ? "https:" : "http:";
+const API = `${PRO}//${window.location.host}/api`;
 
 function age(ts: number): string {
   if (!ts) return "—";
@@ -31,6 +34,42 @@ export function SensorDiagnostics() {
   const togglePanel = useStore((s) => s.togglePanel);
   const [collapsed, setCollapsed] = useState(false);
   const drag = useDraggable();
+
+  // Track ping rate from the first reporting sensor (they all share the same
+  // value once a set-rate has been broadcast).
+  const reportedPingMs = [...sensors.values()].find((s) => s.ping_interval_ms > 0)?.ping_interval_ms ?? 0;
+  const [pingMs, setPingMs] = useState<number>(reportedPingMs || 50);
+  const [pingBusy, setPingBusy] = useState(false);
+  const [pingMsg, setPingMsg] = useState<string | null>(null);
+
+  // When the firmware-reported value changes (e.g. after a successful push), keep
+  // the input in sync as long as the user isn't actively editing.
+  useEffect(() => {
+    if (reportedPingMs > 0 && !pingBusy) {
+      setPingMs(reportedPingMs);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportedPingMs]);
+
+  const applyPingRate = async () => {
+    setPingBusy(true);
+    setPingMsg(null);
+    try {
+      const r = await fetch(`${API}/ping-rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ interval_ms: pingMs }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.detail ?? `${r.status}`);
+      setPingMsg(`pushed to ${data.count ?? 0} sensor(s)`);
+    } catch (e) {
+      setPingMsg(`error: ${String(e)}`);
+    } finally {
+      setPingBusy(false);
+      setTimeout(() => setPingMsg(null), 3000);
+    }
+  };
 
   if (!visible) return null;
 
@@ -66,6 +105,34 @@ export function SensorDiagnostics() {
       </div>
       {!collapsed && (
         <div className="flex-1 overflow-y-auto">
+          {/* Ping-rate control: broadcasts set_ping_rate to all ESP32s. Lower
+              interval = more frames on the channel = higher CSI rate. */}
+          <div className="px-3 py-2 border-b border-radar-border/40 flex items-center gap-2 flex-wrap">
+            <span className="text-zinc-400 uppercase tracking-wider">CSI ping</span>
+            <input
+              type="number"
+              min={10}
+              max={5000}
+              step={10}
+              value={pingMs}
+              onChange={(e) => setPingMs(Math.max(10, Math.min(5000, Number(e.target.value) || 0)))}
+              className="w-16 bg-radar-bg/60 border border-radar-border rounded px-1.5 py-0.5 text-zinc-200 tabular-nums text-right outline-none focus:border-radar-accent"
+            />
+            <span className="text-zinc-500">ms</span>
+            <span className="text-zinc-600">({pingMs > 0 ? (1000 / pingMs).toFixed(1) : "0"} Hz)</span>
+            <button
+              onClick={applyPingRate}
+              disabled={pingBusy || pingMs < 10 || pingMs > 5000}
+              className="ml-auto px-2 py-0.5 rounded border border-radar-border text-radar-accent hover:bg-radar-accent/10 disabled:opacity-50"
+            >
+              {pingBusy ? "…" : "apply"}
+            </button>
+            {pingMsg && (
+              <span className={`w-full text-[10px] ${pingMsg.startsWith("error") ? "text-red-400" : "text-emerald-400"}`}>
+                {pingMsg}
+              </span>
+            )}
+          </div>
           {ports.length === 0 ? (
             <div className="px-3 py-3 text-zinc-500">
               No serial ports discovered. Check `ls /dev/ttyUSB*` on the Pi.
@@ -125,6 +192,19 @@ export function SensorDiagnostics() {
                         <span className="col-span-2 text-zinc-400 tabular-nums">{sensor.drops.toLocaleString()}</span>
                         <span>ring</span>
                         <span className="col-span-2 text-zinc-400">{sensor.ring_free} B free</span>
+                        {sensor.ping_interval_ms > 0 && (
+                          <>
+                            <span>ping</span>
+                            <span className="col-span-2 text-zinc-300 tabular-nums">
+                              <span className="text-emerald-400">{sensor.ping_recv.toLocaleString()}</span>
+                              {" / "}
+                              <span className={sensor.ping_lost > 0 ? "text-yellow-400" : "text-zinc-500"}>
+                                {sensor.ping_lost.toLocaleString()} lost
+                              </span>
+                              <span className="text-zinc-500"> @ {sensor.ping_interval_ms}ms</span>
+                            </span>
+                          </>
+                        )}
                       </>
                     )}
                   </div>
