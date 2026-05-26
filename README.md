@@ -821,6 +821,25 @@ wifi-radar/
 | Sensor height calibration (3D) | trilatération 3D vraie | pending (gros) |
 | TF Lite micro on-device | inférence ML présent/absent | pending (très gros) |
 
+### Évolution sans fil — capteurs sur batterie
+
+Pas un objectif court terme, mais l'architecture s'y prête : aujourd'hui le seul rôle du câble USB est *alimenter + transporter les events JSON*. Les deux peuvent être coupés sans casser la chaîne de mesure.
+
+**Transport** — remplacer l'UART par une socket TCP (ou UDP) vers le backend. ESP32 → AP → Pi, même JSON-line, le backend ouvre un `asyncio.start_server` à la place de `serial_reader`. ESP-NOW reste une alternative si on veut zéro pollution CSI auto-générée, mais ça impose un ESP32 filaire en passerelle, donc plus vraiment "sans fil".
+
+**Énergie** — promiscuous + CSI = radio TX/RX permanente, *pas de light/deep sleep possible*. ~150–200 mA continu à 3.3 V, soit :
+- 1× 18650 (3000 mAh) → ~15 h
+- 2× 18650 parallèle → ~30 h
+- Power bank 10 000 mAh → ~50 h
+
+Pour du 24/7, le **PoE** (splitter PoE → 5 V USB) bat la batterie : capteur libre du USB-data, alimentation perpétuelle, fil Ethernet plus discret.
+
+**Side-effects à anticiper** — quand un capteur upload par Wi-Fi, ses propres frames sont visibles en promiscuous par les autres capteurs sur le même canal. Effet utile (+ trafic CSI, le ping périodique devient moins nécessaire) mais bursty (segments TCP en rafale, pas régulier comme les pings). Probable mitigation : blacklister côté backend les MAC des capteurs eux-mêmes dans le calcul de variance CSI.
+
+**À coder le jour où on s'y met** — transport TCP avec reconnect + ring buffer pendant les coupures, fallback UART en Kconfig, ADC batterie reporté dans le `hb`, OTA HTTP servi par le backend (pour ne plus avoir à récupérer physiquement les capteurs pour flasher).
+
+**Reco hardware** — FireBeetle ESP32-E (charge LiPo intégrée + ADC batterie sur pin dédié, ~12 €) si vraiment batterie, ou DevKitC actuel + splitter PoE si fixe long-terme.
+
 ---
 
 ## Licence
